@@ -1,59 +1,16 @@
 """
-AI'm OK v2.8 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
+AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 ================================================================================
-修复内容（v2.8 新增）：
-  1. 网页版 Tab 切换：国际资讯和国内资讯分为两个 Tab 页面，可切换展示
-     Tab 名称分别为「🌐国际资讯」和「🏮国内资讯」
-  2. 默认展示「🌐国际资讯」Tab，点击可切换至「🏮国内资讯」Tab
-  3. Tab 按钮样式适配暗色主题，激活态使用渐变色高亮
-修复内容（v2.7 新增）：
-  1. 企业商务类新闻过滤：新增 ENTERPRISE_BIZ_FILTER，过滤企业人事变动、
-     战略合作/签约/共建、企业基建项目、代码贡献统计等商务类新闻
-  2. 飞书推送标签优化：「国际」→「🌐国际资讯」，「国内」→「🏮国内资讯」
-  3. 国内源标识优化：🏠 → 🏮（更具辨识度）
-修复内容（v2.6 新增）：
-  1. IT之家内容质量过滤：新增 NON_TECH_FILTER 过滤器，过滤消费电子、汽车、
-     影视娱乐、游戏促销等非AI技术向内容，提升技术内容占比
-  2. 网页版国内资讯标识：🇨🇳 国旗emoji替换为 🏮（兼容Windows等无法显示国旗emoji的平台）
-  3. 网页版/飞书卡片标签文字精简：「国际新闻」→「国际」，「国内新闻」→「国内」
-修复内容（v2.5 新增）：
-  1. PDF过滤：严格禁止输出 .pdf 类型的网址（如 CDN 托管论文）
-  2. 飞书卡片：热点标题颜色从深红色(carmine)改为深蓝色(indigo)
-  3. 飞书卡片：仅推送热度最高的10条热点新闻，其余内容只在网页版展示
-修复内容（v2.4 新增）：
-  1. 飞书卡片：热点标题使用 text_size="large"，比其他文字大两个号
-  2. 飞书卡片：标题和摘要之间不再空开一行（拆分为独立元素紧凑排列）
-  3. 飞书卡片：国际资讯和国内资讯分开两个部分展示，中间隔开
-  4. 飞书卡片：来源行去掉国内外 emoji（🌐/🇨🇳），只显示来源名称
-修复内容（v2.3.1 新增）：
-  1. 新增 HARD_BLOCK_DOMAINS 硬封禁域名黑名单，完全禁止指定产品官网
-  2. wawawriter.com 加入硬封禁黑名单
-修复内容（v2.3 新增）：
-  1. 摘要生成改为逐条调用：彻底消除批量处理导致的标题/摘要与新闻错位问题
-  2. 飞书卡片标题加粗：使用 **加粗** markdown 格式，增强可读性
-  3. 版本号升级至 v2.3
-优化内容（v2.2 新增）：
-  1. 模型升级：qwen2.5:7b → qwen3:14b
-  2. 产品官网/Landing Page 过滤：减少产品类网站，除非热度特别高
-优化内容（v2.1 新增）：
-  1. 融资/政策类新闻限流：新增 FUNDING_POLICY_FILTER，单次最多保留 2 条
-  2. 综合热度评分排序：新增 calculate_heat_score()，替代单一 HN score 排序
-  3. 技术实践类内容加权：新增 PRACTICE_BOOST，优先展示技术突破/大模型/实际应用
-  4. 飞书卡片移除统计信息头
-  5. 新增国内源：新浪科技、今日头条、澎湃新闻
-  6. 优化国际源：Ben's Bites → Wired，ScienceDaily → IEEE Spectrum
-  7. 国内外平衡参数调整：国内占比 35%-55%
-原有优化内容：
-  - 数据源扩展：国际 9 源 + 国内 9 源，共 18 个数据源
-  - 智能去重：URL去重 + 标题相似度去重（difflib）
-  - 来源多样性约束：单源上限 3 条、最终至少 5 个不同来源
-  - 国内外平衡控制
-  - 质量筛选：过滤软文、旧闻、标题党、GitHub 链接（增强版）
-  - 抓取状态追踪：自动检测成功/失败源数量，不足时触发补充搜索
-  - 摘要生成优化：增强 Prompt，区分国内外新闻撰写风格
-  - 来源展示名规范化 + 来源类型标识（🌐 国际 / 🏮 国内）
-  - GitHub 链接增强过滤：覆盖 gist/raw/pages 等全部 GitHub 域名
-依赖：pip install feedparser requests difflib(标准库)
+修复内容（v3.2 新增）：
+  1. 修复日期伪造问题：scrape_links_from_page 和 _scrape_jiqizhixin 不再将
+     所有抓取到的文章日期强制设为当天，改为从 URL 中提取真实发布日期。
+  2. 日期缺失处理：当无法确定文章发布日期时，默认跳过该条新闻，不再静默放行。
+  3. 新增 extract_date_from_url() 工具函数，支持从 URL 路径中提取日期。
+================================================================================
+历史修复：
+  v3.1: 严格拦截非新闻链接、网页底部特征过滤器、强化抓取清洗逻辑。
+  v3.0: 新增文章正文抓取、强化反幻觉 Prompt、新增摘要事实校验。
+  v2.9: 严格禁止特定产品网站、72小时时效、隔日去重、HN映射修复。
 """
 
 import json
@@ -63,21 +20,48 @@ import subprocess
 import time
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
-from html import escape
+from html import escape, unescape
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
+from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
+
+import sys
+try:
+    from review_server import start_review_server
+except Exception:
+    start_review_server = None
+
+# Windows GBK 控制台下避免 emoji 输出导致崩溃
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except Exception:
+        pass
+
+_orig_print = print
+def print(*args, **kwargs):  # type: ignore[override]
+    safe_args = []
+    enc = (getattr(sys.stdout, "encoding", None) or "").lower()
+    for a in args:
+        s = str(a)
+        if "gbk" in enc:
+            s = s.encode("gbk", errors="ignore").decode("gbk", errors="ignore")
+        safe_args.append(s)
+    _orig_print(*safe_args, **kwargs)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 配置区域（建议敏感信息迁移至环境变量）
 # ══════════════════════════════════════════════════════════════════════════════
 
-FEISHU_WEBHOOK = os.environ.get(
-    "FEISHU_WEBHOOK",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
-)
+
+FEISHU_WEBHOOKS = os.environ.get(
+    "FEISHU_WEBHOOKS",
+    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00"
+).split(",")
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:14b"
@@ -85,10 +69,11 @@ OLLAMA_MODEL = "qwen3:14b"
 OUTPUT_DIR = Path.home()
 PAGES_DIR = Path.home() / "AI-m-OK"
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
+HISTORY_FILE = PAGES_DIR / "push_history.json"
 
 # ── 数量与多样性约束 ──
-MAX_ITEMS = 18
-MIN_ITEMS = 12
+MAX_ITEMS = 26
+MIN_ITEMS = 16
 HN_TOP_N = 50
 MAX_PER_SOURCE = 3
 MIN_SOURCES = 5
@@ -96,13 +81,81 @@ DOMESTIC_RATIO_MIN = 0.35
 DOMESTIC_RATIO_MAX = 0.55
 MIN_DOMESTIC_SUCCESS = 2
 MIN_INTL_SUCCESS = 3
-OLD_NEWS_DAYS = 7
+OLD_NEWS_HOURS = 72
 MAX_FUNDING_POLICY = 2
 PRODUCT_HEAT_THRESHOLD = 90
-FEISHU_TOP_N = 10
+FEISHU_TOP_N = 15
+
+# ── 实用导向筛选（v3.3） ──
+PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
+PRACTICAL_MIN_SCORE = int(os.environ.get("PRACTICAL_MIN_SCORE", "2"))
+VIDEO_MAX_AGE_DAYS = int(os.environ.get("VIDEO_MAX_AGE_DAYS", "7"))
+
+# ── 社媒/视频抓取源配置（v3.3） ──
+RSSHUB_BASES = [
+    x.strip().rstrip("/")
+    for x in os.environ.get("RSSHUB_BASES", "https://rsshub.app").split(",")
+    if x.strip()
+]
+
+# 支持直接传入 YouTube 官方 feed 地址（推荐：https://www.youtube.com/feeds/videos.xml?channel_id=xxx）
+YOUTUBE_FEED_URLS = [
+    x.strip()
+    for x in os.environ.get("YOUTUBE_FEED_URLS", "").split(",")
+    if x.strip()
+]
+
+NITTER_BASES = [
+    x.strip().rstrip("/")
+    for x in os.environ.get(
+        "NITTER_BASES",
+        "https://nitter.poast.org,https://nitter.privacydev.net,https://nitter.net"
+    ).split(",")
+    if x.strip()
+]
+
+# ── v3.0 新增：文章正文抓取配置 ──
+ARTICLE_EXCERPT_MAX_CHARS = 1200
+ARTICLE_FETCH_TIMEOUT = 10
 
 # ── 北京时区 ──
 BEIJING_TZ = timezone(timedelta(hours=8))
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v3.0 新增：已知 AI 实体映射表（用于反幻觉校验）
+# ══════════════════════════════════════════════════════════════════════════════
+
+KNOWN_AI_ENTITIES = {
+    # 公司 -> 旗下模型/产品
+    "OpenAI": ["GPT", "ChatGPT", "DALL-E", "Sora", "o1", "o3", "o4-mini", "Codex"],
+    "Anthropic": ["Claude", "Opus", "Sonnet", "Haiku"],
+    "Google": ["Gemini", "Bard", "PaLM", "Gemma", "Veo", "Imagen"],
+    "Meta": ["Llama", "LLaMA", "SAM", "NLLB", "Cicero"],
+    "Mistral": ["Mistral", "Mixtral", "Pixtral"],
+    "xAI": ["Grok"],
+    "智谱AI": ["GLM", "ChatGLM", "CogView", "CogVideo"],
+    "百度": ["文心一言", "ERNIE"],
+    "阿里": ["通义千问", "Qwen"],
+    "字节跳动": ["豆包", "Doubao", "即梦"],
+    "月之暗面": ["Kimi", "Moonshot"],
+    "DeepSeek": ["DeepSeek"],
+    "百川智能": ["Baichuan"],
+    "MiniMax": ["MiniMax", "海螺"],
+    "零一万物": ["Yi"],
+    "阶跃星辰": ["Step"],
+    "Stability AI": ["Stable Diffusion", "SDXL"],
+    "Midjourney": ["Midjourney"],
+    "Nvidia": ["NeMo", "Nemotron"],
+    "Microsoft": ["Copilot", "Phi"],
+    "Apple": ["Apple Intelligence"],
+    "Amazon": ["Titan", "Nova"],
+}
+
+# 反向映射：模型/产品关键词 -> 正确的公司
+MODEL_TO_COMPANY = {}
+for company, models in KNOWN_AI_ENTITIES.items():
+    for model in models:
+        MODEL_TO_COMPANY[model.lower()] = company
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 关键词与过滤器
@@ -163,6 +216,12 @@ SOFT_AD_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+# ── ★ v3.1 新增：网页底部备案与非新闻文本过滤器 ──
+FOOTER_TEXT_FILTER = re.compile(
+    r"ICP备|公网安备|版权所有|All Rights Reserved|联系我们|关于我们|免责声明|隐私政策|使用条款|营业执照|增值电信业务|不良信息举报",
+    re.IGNORECASE,
+)
+
 # ── 融资/政策类过滤器 ──
 FUNDING_POLICY_FILTER = re.compile(
     r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie[s\s]"
@@ -205,42 +264,46 @@ PRODUCT_SITE_DOMAINS = re.compile(
     re.IGNORECASE,
 )
 
+# ── ★ v3.1 增强：严格封禁的产品网页及非新闻链接 ──
 HARD_BLOCK_DOMAINS = re.compile(
-    r"wawawriter\.com",
+    r"wawawriter\.com"
+    r"|claude\.com/blog/claude-managed-agents"
+    r"|anthropic\.com/glasswing"
+    r"|chatdesks\.cn"           # 拦截豆包等推广/客服分发链接
+    r"|beian\.miit\.gov\.cn"    # 拦截工信部备案链接
+    r"|cyberpolice\.cn"         # 拦截公安备案链接
+    r"|gov\.cn"                 # 拦截纯政府通用域名（通常是底部外链）
+    r"|ibiling\.cn"             # <--- 新增：拦截 ibiling 产品页
+    r"|iflydocs\.com"           # <--- 新增：拦截讯飞文档产品页
+    r"|/about-us"
+    r"|/contact-us"
+    r"|/privacy"
+    r"|/terms",
     re.IGNORECASE,
 )
 
-# ── v2.6 新增：非技术向内容过滤器（消费电子/汽车/影视/游戏促销等） ──
+# ── 非技术向内容过滤器（消费电子/汽车/影视/游戏促销等） ──
 NON_TECH_FILTER = re.compile(
-    # 汽车/出行类
     r"汽车|新车|车型|轿车|SUV|电动车(?!.*AI)|混动|油耗|续航里程|4S店"
     r"|比亚迪(?!.*AI)|特斯拉(?!.*AI|FSD|自动驾驶)|极氪|蔚来(?!.*AI)|小鹏(?!.*AI)"
     r"|理想汽车|长城汽车|吉利汽车|广汽|一汽|东风汽车|奇瑞"
     r"|海豹|海鸥|宋PLUS|汉EV|秦PLUS|元PLUS"
-    # 影视/娱乐类
     r"|电视剧|电影|首播|上映|票房|追剧|剧集|综艺|真人秀"
     r"|黑袍纠察队|漫威|DC|Netflix|Prime.Video|迪士尼\+"
     r"|动漫|番剧|声优|偶像"
-    # 游戏促销/非AI游戏类
     r"|游戏促销|史低|打折|限免|喜加一|Steam(?!.*AI)|Epic(?!.*AI)"
     r"|PS[45]|Xbox|Switch|任天堂"
-    # 消费电子/外设/配件类（非AI相关）
     r"|键盘(?!.*AI)|鼠标(?!.*AI)|耳机(?!.*AI)|音箱(?!.*AI)|充电器|数据线|保护壳"
     r"|散热器(?!.*AI)|机箱|电源(?!.*AI|算力)|显示器(?!.*AI)"
     r"|镜头|相机(?!.*AI)|摄影器材"
-    # 手机/平板评测（非AI功能）
     r"|开箱|跑分|拆解|手机壳|钢化膜|手机膜"
-    # 生活/家电类
     r"|冰箱|洗衣机|空调(?!.*AI)|扫地机(?!.*AI)|净水器|电饭煲"
     r"|智能马桶|浴霸|油烟机"
-    # 运营商/套餐类
     r"|套餐|流量卡|话费|宽带(?!.*AI)"
-    # 电商促销类
     r"|优惠券|红包|满减|秒杀|预售|双十一|618|年货节",
     re.IGNORECASE,
 )
 
-# v2.6 新增：AI 豁免关键词（当标题同时命中 NON_TECH_FILTER 和 AI_EXEMPT 时，保留该条目）
 AI_EXEMPT = re.compile(
     r"AI|人工智能|大模型|智能驾驶|自动驾驶|FSD|智能座舱"
     r"|GPT|LLM|深度学习|机器学习|神经网络|智能体"
@@ -248,29 +311,22 @@ AI_EXEMPT = re.compile(
     re.IGNORECASE,
 )
 
-# ── v2.7 新增：企业商务类新闻过滤器 ──
-# 过滤企业人事变动、战略合作/签约/共建、企业基建项目、生态贡献统计等商务类新闻
+# ── 企业商务类新闻过滤器 ──
 ENTERPRISE_BIZ_FILTER = re.compile(
-    # 企业人事/高管变动（需要有任命动词 + 职位）
     r"(?:出任|担任|任命|升任|离职|加盟|履新|接任).{0,10}(?:CTO|CEO|CFO|COO|CMO|总裁|副总裁|董事长|总经理|首席)"
     r"|(?:CTO|CEO|CFO|COO|总裁|副总裁|董事长|总经理).{0,6}(?:变动|调整|更替|换帅|离任)"
     r"|人事变动|组织架构调整|设立.*(?:委员会|事业部)|升级.*(?:组织架构|事业部)"
-    # 企业合作/签约/共建
     r"|战略合作|达成合作|签约仪式|签署.*协议|合作备忘录"
     r"|共建.*(?:集群|中心|基地|平台|实验室)"
     r"|联合建设|携手.*打造|强强联合|生态合作|框架协议"
-    # 企业生态/贡献统计
     r"|代码贡献.*(?:万行|百万行)"
     r"|推动.*生态发展|加速.*生态"
-    # 企业基建项目（非技术突破）
     r"|(?:万卡|千卡).*集群"
     r"|(?:智算|算力|数据)中心.*(?:建设|落地|启用|投产|揭牌)"
-    # 企业财务/商务
     r"|营收.*(?:增长|下降|同比|环比)|净利润|财报发布|业绩报告|中标|招标|采购",
     re.IGNORECASE,
 )
 
-# ── 实践/技术类加分匹配器 ──
 PRACTICE_BOOST = re.compile(
     r"tutorial|how.to|实战|教程|部署|fine.?tun|微调|训练|推理|inference"
     r"|benchmark|评测|对比|测评|实测|体验|上手|接入|集成|API"
@@ -280,26 +336,91 @@ PRACTICE_BOOST = re.compile(
     re.IGNORECASE,
 )
 
-# ── 技术突破加分匹配器 ──
 TECH_BOOST = re.compile(
     r"breakthrough|突破|首次|首发|全球首|benchmark|SOTA|超越|刷新|纪录"
     r"|发布|launch|release|推出|上线|开源|open.?source",
     re.IGNORECASE,
 )
 
-# ── 关键实体加分匹配器 ──
 HOT_ENTITY = re.compile(
     r"OpenAI|Google|Meta|Apple|Microsoft|Nvidia|DeepSeek"
     r"|百度|阿里|腾讯|字节|华为|GPT-5|Claude|Gemini",
     re.IGNORECASE,
 )
 
+# ── v3.3 实用导向强约束：强调“可学、可复用、可实践” ──
+PRACTICAL_SIGNAL = re.compile(
+    r"教程|实战|上手|复现|部署|接入|集成|案例|工作流|workflow|prompt"
+    r"|agent|智能体|RAG|自动化|脚本|插件|plugin|api|sdk|tool|工具链"
+    r"|开源|github|模板|template|复用|best.practice|how.to|guide|playbook"
+    r"|benchmark|评测|对比|实践|落地|效率|提效|办公|生产力|运营|销售|客服|数据分析"
+    r"|skill|skills|skillset|agentic|copilot|n8n|zapier|make\.com|dify|coze"
+    r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样",
+    re.IGNORECASE,
+)
+
+REUSABLE_SIGNAL = re.compile(
+    r"open.?source|repo|github|模板|template|脚手架|boilerplate|sdk|api|示例代码|代码仓库"
+    r"|插件市场|workflow模板|automation模板|prompt模板|agent模板|工程模板",
+    re.IGNORECASE,
+)
+
+INNOVATION_SIGNAL = re.compile(
+    r"新模型|模型发布|技术突破|新范式|架构创新|推理能力|多模态|agentic"
+    r"|reasoning|benchmark|SOTA|state.of.the.art|latency|成本下降|效率提升"
+    r"|发布|launch|release|introduce|rollout",
+    re.IGNORECASE,
+)
+
+MODEL_SIGNAL = re.compile(
+    r"model|llm|gpt|claude|gemini|qwen|deepseek|mistral|agent|多模态|大模型|推理模型",
+    re.IGNORECASE,
+)
+
+APPLICATION_SIGNAL = re.compile(
+    r"应用|场景|落地|部署|workflow|自动化|效率|生产力|集成|api|sdk|tool|agent|RAG|实战|教程|案例"
+    r"|音频制作|播客制作|配音工作流|语音克隆|字幕转写|音频后期|音乐生成",
+    re.IGNORECASE,
+)
+
+LOW_VALUE_SIGNAL = re.compile(
+    r"融资|估值|人事|任命|合作签约|生态合作|政策|监管|法案|诉讼|广告|赞助|带货"
+    r"|明星|八卦|营销|发布会回顾",
+    re.IGNORECASE,
+)
+
+SOCIAL_VIDEO_DOMAINS = re.compile(
+    r"bilibili\.com|b23\.tv|youtube\.com|youtu\.be|weibo\.com|twitter\.com|x\.com",
+    re.IGNORECASE,
+)
+
+SOCIAL_PRACTICAL_QUERIES = [
+    "AI 教程 实战 工作流",
+    "AI 自动化 提效 案例",
+    "AI Agent RAG 部署",
+    "AI 开源 工具 复用",
+    "LLM 应用 落地",
+    "AI skill 教程",
+    "AI agent workflow tutorial",
+    "AI 音频 工作流 教程",
+    "播客 AI 工具 实战",
+    "配音 AI agent 工具",
+]
+
+MODEL_INNOVATION_QUERIES = [
+    "new AI model release benchmark",
+    "reasoning model launch practical usage",
+    "多模态 模型 发布 实践",
+    "AI 技术突破 应用场景",
+    "audio AI model release",
+    "voice agent workflow",
+]
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 来源注册表  （v2.7 修改：🏠 → 🏮）
+# 来源注册表
 # ══════════════════════════════════════════════════════════════════════════════
 
 SOURCE_REGISTRY = {
-    # ── 国际源 ──
     "TechCrunch":       {"type": "intl", "display": "TechCrunch",       "icon": "🌐"},
     "Hacker News":      {"type": "intl", "display": "Hacker News",      "icon": "🌐"},
     "TLDR.tech":        {"type": "intl", "display": "TLDR",             "icon": "🌐"},
@@ -309,7 +430,11 @@ SOURCE_REGISTRY = {
     "MIT Tech Review":  {"type": "intl", "display": "MIT Tech Review",  "icon": "🌐"},
     "IEEE Spectrum":    {"type": "intl", "display": "IEEE Spectrum",    "icon": "🌐"},
     "Wired":            {"type": "intl", "display": "Wired",            "icon": "🌐"},
-    # ── 国内源 ──（v2.7: 🏠 → 🏮）
+    "YouTube":          {"type": "intl", "display": "YouTube",          "icon": "📺"},
+    "Twitter":          {"type": "intl", "display": "Twitter",          "icon": "💬"},
+    "X":                {"type": "intl", "display": "X",                "icon": "💬"},
+    "B站":               {"type": "domestic", "display": "B站",           "icon": "📺"},
+    "微博":              {"type": "domestic", "display": "微博",          "icon": "📣"},
     "机器之心":          {"type": "domestic", "display": "机器之心",       "icon": "🏮"},
     "量子位":            {"type": "domestic", "display": "量子位",         "icon": "🏮"},
     "36氪":              {"type": "domestic", "display": "36氪",           "icon": "🏮"},
@@ -321,7 +446,6 @@ SOURCE_REGISTRY = {
     "澎湃新闻":          {"type": "domestic", "display": "澎湃新闻",       "icon": "🏮"},
 }
 
-# ── 来源基础热度权重 ──
 SOURCE_WEIGHT = {
     "Hacker News": 1.0,
     "TechCrunch": 80,
@@ -332,6 +456,11 @@ SOURCE_WEIGHT = {
     "TLDR.tech": 60,
     "IEEE Spectrum": 75,
     "Wired": 70,
+    "YouTube": 78,
+    "Twitter": 72,
+    "X": 72,
+    "B站": 80,
+    "微博": 68,
     "机器之心": 85,
     "量子位": 75,
     "36氪": 70,
@@ -343,9 +472,7 @@ SOURCE_WEIGHT = {
     "澎湃新闻": 68,
 }
 
-
 def get_source_info(source_name):
-    """获取来源的规范化信息。"""
     info = SOURCE_REGISTRY.get(source_name, {})
     return {
         "type": info.get("type", "intl"),
@@ -358,8 +485,6 @@ def get_source_info(source_name):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SourceTracker:
-    """追踪每个数据源的抓取状态。"""
-
     def __init__(self):
         self.results = {}
 
@@ -399,11 +524,35 @@ class SourceTracker:
 tracker = SourceTracker()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 历史记录管理（用于隔日去重）
+# ══════════════════════════════════════════════════════════════════════════════
+
+def load_history():
+    """加载已推送的历史 URL 记录"""
+    if HISTORY_FILE.exists():
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+def save_history(new_urls):
+    """保存推送记录，保留最近 1000 条防止文件过大"""
+    history = load_history()
+    updated = list(history.union(new_urls))[-1000:]
+    try:
+        PAGES_DIR.mkdir(parents=True, exist_ok=True)
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(updated, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"  [WARN] Failed to save history: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 通用抓取工具函数
 # ══════════════════════════════════════════════════════════════════════════════
 
 def safe_request(url, timeout=15, headers=None):
-    """带重试的安全 HTTP 请求。"""
     default_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -426,14 +575,313 @@ def safe_request(url, timeout=15, headers=None):
                 raise e
     return None
 
-
 def is_github_url(url):
-    """统一判断是否为 GitHub 相关链接（增强版）。"""
     return bool(GITHUB_FILTER.search(url))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ★ v3.2 新增：从 URL 中提取真实发布日期
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_date_from_url(url):
+    """
+    尝试从 URL 路径中提取发布日期。
+    许多新闻网站的 URL 中包含日期信息，如:
+      - https://www.jiqizhixin.com/articles/2026-04-09-xxx
+      - https://36kr.com/p/2026041300001
+      - https://tech.sina.com.cn/2026-04-13/doc-xxx.shtml
+      - https://www.ithome.com/0/846/123.htm (无日期，返回 None)
+    返回 "YYYY-MM-DD" 格式字符串，提取失败则返回 None。
+    """
+    try:
+        # 模式1: /YYYY/MM/DD/ 或 /YYYY-MM-DD/ 或 /YYYY_MM_DD/
+        m = re.search(r'/(\d{4})[/\-_](\d{1,2})[/\-_](\d{1,2})', url)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if 2020 <= y <= 2030 and 1 <= mo <= 12 and 1 <= d <= 31:
+                return f"{y:04d}-{mo:02d}-{d:02d}"
+
+        # 模式2: /YYYYMMDD (8位连续数字，常见于国内新闻网站)
+        m = re.search(r'/(\d{4})(\d{2})(\d{2})', url)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if 2020 <= y <= 2030 and 1 <= mo <= 12 and 1 <= d <= 31:
+                return f"{y:04d}-{mo:02d}-{d:02d}"
+
+        # 模式3: 查询参数中的日期 (如 ?date=2026-04-13)
+        m = re.search(r'[?&]date=(\d{4})-(\d{2})-(\d{2})', url)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if 2020 <= y <= 2030 and 1 <= mo <= 12 and 1 <= d <= 31:
+                return f"{y:04d}-{mo:02d}-{d:02d}"
+
+        return None
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ★ v3.1 新增：通用产品官网首页自动检测
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _is_product_homepage(url):
+    """
+    判断 URL 是否为产品官网首页（非新闻文章）。
+    当 HN 文章的原始链接是网站根路径（如 https://botctl.dev/），
+    大概率是产品官网首页而非新闻文章，应自动替换为 HN 讨论页。
+    """
+    try:
+        parsed = urlparse(url)
+        path = parsed.path.rstrip("/")
+
+        # 已知的 HN 自身域名，不视为产品官网
+        if "ycombinator.com" in parsed.netloc or "news.ycombinator" in parsed.netloc:
+            return False
+
+        # 1. 根路径或空路径 → 大概率是产品官网首页
+        if not path or path == "":
+            return True
+
+        # 2. 只有一级路径且为典型产品页面（如 /pricing、/about）→ 产品页
+        segments = [s for s in path.split("/") if s]
+        if len(segments) == 1 and segments[0].lower() in {
+            "pricing", "about", "features", "docs", "signup",
+            "register", "login", "download", "get-started",
+            "try", "demo", "contact", "enterprise", "pro",
+            "plans", "solutions", "platform", "overview",
+            "changelog", "roadmap", "careers", "jobs",
+        }:
+            return True
+
+        # 3. 非主流新闻/博客域名 且 只有短路径（≤1段）→ 很可能是产品官网
+        known_content_domains = {
+            # 主流新闻媒体
+            "techcrunch.com", "theverge.com", "arstechnica.com",
+            "wired.com", "venturebeat.com", "technologyreview.com",
+            "spectrum.ieee.org", "reuters.com", "bloomberg.com",
+            "nytimes.com", "wsj.com", "bbc.com", "bbc.co.uk",
+            "theguardian.com", "cnbc.com", "apnews.com",
+            "zdnet.com", "cnet.com", "engadget.com",
+            "theregister.com", "tomshardware.com",
+            # 技术博客/社区
+            "medium.com", "dev.to", "substack.com",
+            "wordpress.com", "blogspot.com",
+            "reddit.com", "twitter.com", "x.com",
+            "youtube.com", "youtu.be", "bilibili.com", "b23.tv",
+            "weibo.com", "news.google.com", "nitter.net",
+            # 国内媒体
+            "jiqizhixin.com", "qbitai.com", "36kr.com",
+            "ithome.com", "thepaper.cn", "sina.com.cn",
+            "infoq.cn", "aihub.cn",
+            # 官方博客子域（常见模式）
+            "blog.google", "openai.com", "anthropic.com",
+            "ai.meta.com", "deepmind.google",
+        }
+        domain = parsed.netloc.lower().replace("www.", "")
+        if domain not in known_content_domains and len(segments) <= 1:
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
+def build_google_news_rss(query, hl="zh-CN", gl="CN", ceid="CN:zh-Hans"):
+    encoded = quote_plus(query)
+    return f"https://news.google.com/rss/search?q={encoded}&hl={hl}&gl={gl}&ceid={ceid}"
+
+
+def _mark_social_item(item, platform="", is_video=False):
+    item["is_social"] = True
+    item["platform"] = platform or item.get("source", "")
+    item["is_video"] = bool(is_video)
+    return item
+
+
+def parse_rss_feed_candidates(urls, source_name, max_entries=20, ai_filter=False):
+    merged = []
+    seen = set()
+    for feed_url in urls:
+        if not feed_url:
+            continue
+        try:
+            part = parse_rss_feed(
+                feed_url,
+                source_name=source_name,
+                max_entries=max_entries,
+                ai_filter=ai_filter,
+            )
+            for it in part:
+                norm = it.get("url", "").rstrip("/")
+                if norm and norm not in seen:
+                    seen.add(norm)
+                    merged.append(it)
+        except Exception:
+            continue
+    return merged
+
+
+def _fetch_google_news_site(site_domain, source_name, extra_queries, max_entries=8):
+    urls = []
+    for q in extra_queries:
+        query = f"site:{site_domain} ({q})"
+        urls.append(build_google_news_rss(query))
+    items = parse_rss_feed_candidates(
+        urls=urls,
+        source_name=source_name,
+        max_entries=max_entries,
+        ai_filter=False,
+    )
+    return items
+
+
+def _fetch_rsshub_keyword(route_template, source_name, keywords, max_entries=8):
+    urls = []
+    for base in RSSHUB_BASES:
+        for kw in keywords:
+            encoded = quote_plus(kw)
+            urls.append(f"{base}/{route_template.format(keyword=encoded).lstrip('/')}")
+    return parse_rss_feed_candidates(
+        urls=urls,
+        source_name=source_name,
+        max_entries=max_entries,
+        ai_filter=False,
+    )
+
+
+def _fetch_nitter_search(source_name, keywords, max_entries=8):
+    urls = []
+    for base in NITTER_BASES:
+        for kw in keywords:
+            urls.append(f"{base}/search/rss?f=tweets&q={quote_plus(kw)}")
+    return parse_rss_feed_candidates(
+        urls=urls,
+        source_name=source_name,
+        max_entries=max_entries,
+        ai_filter=False,
+    )
+
+
+def _now_iso():
+    return datetime.now(BEIJING_TZ).isoformat()
+
+
+def _to_iso_from_struct_time(st):
+    try:
+        if not st:
+            return ""
+        dt = datetime(st.tm_year, st.tm_mon, st.tm_mday, st.tm_hour, st.tm_min, st.tm_sec, tzinfo=timezone.utc)
+        return dt.astimezone(BEIJING_TZ).isoformat()
+    except Exception:
+        return ""
+
+
+def normalize_entry_date(entry, link=""):
+    """
+    统一归一化 feed 条目日期：
+    1) published/updated
+    2) published_parsed/updated_parsed
+    3) URL 日期
+    4) 兜底使用当前时间（并标记 inferred）
+    """
+    candidates = [
+        entry.get("published", ""),
+        entry.get("updated", ""),
+    ]
+    for c in candidates:
+        if isinstance(c, str) and c.strip():
+            return c.strip(), False
+
+    parsed_candidates = [
+        entry.get("published_parsed"),
+        entry.get("updated_parsed"),
+    ]
+    for st in parsed_candidates:
+        iso = _to_iso_from_struct_time(st)
+        if iso:
+            return iso, False
+
+    from_url = extract_date_from_url(link or "")
+    if from_url:
+        return from_url, False
+
+    return _now_iso(), True
+
+
+def parse_date_to_beijing(date_val):
+    """
+    解析任意 date 字段为北京时间 datetime；失败返回 None
+    """
+    try:
+        if isinstance(date_val, datetime):
+            return date_val.astimezone(BEIJING_TZ) if date_val.tzinfo else date_val.replace(tzinfo=BEIJING_TZ)
+        if not date_val:
+            return None
+        if isinstance(date_val, str):
+            s = date_val.strip()
+            if not s:
+                return None
+            if "T" in s:
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(BEIJING_TZ)
+            if re.match(r"\d{4}-\d{2}-\d{2}$", s):
+                return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+            if re.match(r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}", s):
+                return datetime.strptime(s[:16], "%Y-%m-%d %H:%M").replace(tzinfo=BEIJING_TZ)
+            try:
+                return parsedate_to_datetime(s).astimezone(BEIJING_TZ)
+            except Exception:
+                return None
+    except Exception:
+        return None
+    return None
+
+
+def is_within_days(date_val, days):
+    dt = parse_date_to_beijing(date_val)
+    if not dt:
+        return False
+    delta = datetime.now(BEIJING_TZ) - dt
+    return timedelta(0) <= delta <= timedelta(days=days)
+
+
+def normalize_social_url(url):
+    """
+    将 Twitter/X 原链接转换为更可访问链接；不改变业务语义。
+    """
+    if not url:
+        return url
+    u = url.strip()
+    base = NITTER_BASES[0] if NITTER_BASES else "https://nitter.net"
+    base = base.rstrip("/")
+    if "x.com/" in u:
+        return u.replace("https://x.com/", f"{base}/").replace("http://x.com/", f"{base}/")
+    if "twitter.com/" in u:
+        return u.replace("https://twitter.com/", f"{base}/").replace("http://twitter.com/", f"{base}/")
+    return u
+
+
+def is_theverge_paywalled(item):
+    """
+    粗粒度付费墙检测：标题/摘要/URL 命中 paywall 相关词则剔除。
+    """
+    t = item.get("title", "")
+    s = item.get("summary", "")
+    u = item.get("url", "")
+    text = f"{t} {s} {u}"
+    return bool(re.search(r"subscriber|subscription|paywall|exclusive|members.?only|premium", text, re.IGNORECASE))
+
+
+def warmup_sina_homepage():
+    """
+    先打开新浪科技首页，获得 cookie，再抓详情页，降低直链失败概率。
+    """
+    try:
+        safe_request("https://tech.sina.com.cn/", timeout=10)
+    except Exception:
+        pass
+
+
 def parse_rss_feed(url, source_name, max_entries=20, ai_filter=False):
-    """通用 RSS 解析函数。"""
     items = []
     try:
         feed = feedparser.parse(url)
@@ -456,24 +904,28 @@ def parse_rss_feed(url, source_name, max_entries=20, ai_filter=False):
                 continue
             if PAPER_FILTER.search(title) or PAPER_FILTER.search(link):
                 continue
+            # ★ v3.1 拦截底部备案文本
+            if FOOTER_TEXT_FILTER.search(title):
+                continue
 
+            normalized_date, inferred_date = normalize_entry_date(entry, link=link)
             items.append({
                 "title": title,
                 "url": link,
                 "summary": summary,
                 "source": source_name,
                 "source_type": get_source_info(source_name)["type"],
-                "date": entry.get("published", ""),
+                "date": normalized_date,
+                "date_inferred": inferred_date,
+                "fetched_at": _now_iso(),
                 "score": 0,
             })
     except Exception as e:
         print(f"  [WARN] {source_name} RSS parse failed: {e}")
     return items
 
-
 def scrape_links_from_page(url, source_name, link_pattern=None,
                            title_min_len=10, max_items=15, ai_filter=True):
-    """通用网页爬取函数：提取页面中的标题+链接。"""
     items = []
     try:
         resp = safe_request(url)
@@ -503,17 +955,27 @@ def scrape_links_from_page(url, source_name, link_pattern=None,
                     continue
                 if GITHUB_TITLE_FILTER.search(title):
                     continue
+                # ★ v3.1 拦截底部备案文本和硬封禁域名
+                if FOOTER_TEXT_FILTER.search(title):
+                    continue
+                if HARD_BLOCK_DOMAINS.search(link_url):
+                    continue
+                    
                 if ai_filter:
                     if not (AI_KEYWORDS.search(title) or AI_KEYWORDS_ZH.search(title)):
                         continue
                 seen.add(link_url)
+                extracted_date = extract_date_from_url(link_url)
                 items.append({
                     "title": title,
                     "url": link_url,
                     "summary": f"via {source_name}",
                     "source": source_name,
                     "source_type": get_source_info(source_name)["type"],
-                    "date": datetime.now(BEIJING_TZ).strftime("%Y-%m-%d"),
+                    # 优先 URL 日期，缺失时回退当前抓取时间（带 inferred 标记）
+                    "date": extracted_date or _now_iso(),
+                    "date_inferred": not bool(extracted_date),
+                    "fetched_at": _now_iso(),
                     "score": 0,
                 })
                 if len(items) >= max_items:
@@ -522,13 +984,284 @@ def scrape_links_from_page(url, source_name, link_pattern=None,
         print(f"  [WARN] {source_name} scrape failed: {e}")
     return items
 
+# ══════════════════════════════════════════════════════════════════════════════
+# v3.0 新增：文章正文抓取（为 LLM 摘要提供充分上下文）
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _truncate_text(text, max_chars):
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) > max_chars:
+        return text[:max_chars] + "..."
+    return text
+
+
+def _extract_youtube_subtitles(url, max_chars=ARTICLE_EXCERPT_MAX_CHARS):
+    try:
+        resp = safe_request(url, timeout=ARTICLE_FETCH_TIMEOUT)
+        if not resp:
+            return ""
+        html = resp.text
+
+        track_urls = re.findall(r'"baseUrl":"(https:[^"]+timedtext[^"]+)"', html)
+        for raw in track_urls:
+            subtitle_url = raw.replace("\\u0026", "&").replace("\\/", "/")
+            try:
+                sub_resp = safe_request(subtitle_url, timeout=ARTICLE_FETCH_TIMEOUT)
+                if not sub_resp:
+                    continue
+                text_nodes = re.findall(r"<text[^>]*>(.*?)</text>", sub_resp.text, flags=re.DOTALL | re.IGNORECASE)
+                if not text_nodes:
+                    continue
+                caption = " ".join(unescape(t) for t in text_nodes)
+                caption = re.sub(r"<[^>]+>", " ", caption)
+                caption = _truncate_text(caption, max_chars)
+                if len(caption) >= 80:
+                    return caption
+            except Exception:
+                continue
+
+        # 回退：抓 shortDescription
+        m = re.search(r'"shortDescription":"([^"]{40,})"', html)
+        if m:
+            desc = m.group(1).replace("\\n", " ").replace("\\/", "/")
+            return _truncate_text(unescape(desc), max_chars)
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_bilibili_subtitles(url, max_chars=ARTICLE_EXCERPT_MAX_CHARS):
+    try:
+        resp = safe_request(url, timeout=ARTICLE_FETCH_TIMEOUT, headers={"Referer": "https://www.bilibili.com/"})
+        if not resp:
+            return ""
+        html = resp.text
+
+        sub_urls = re.findall(r'"subtitle_url":"([^"]+)"', html)
+        for raw in sub_urls:
+            sub_url = raw.replace("\\u002F", "/").replace("\\/", "/")
+            if sub_url.startswith("//"):
+                sub_url = "https:" + sub_url
+            elif sub_url.startswith("/"):
+                sub_url = "https://api.bilibili.com" + sub_url
+            try:
+                sub_resp = safe_request(sub_url, timeout=ARTICLE_FETCH_TIMEOUT, headers={"Referer": "https://www.bilibili.com/"})
+                if not sub_resp:
+                    continue
+                data = sub_resp.json() if "application/json" in sub_resp.headers.get("Content-Type", "") else {}
+                body = data.get("body", []) if isinstance(data, dict) else []
+                if body:
+                    caption = " ".join(x.get("content", "") for x in body if isinstance(x, dict))
+                    caption = _truncate_text(caption, max_chars)
+                    if len(caption) >= 80:
+                        return caption
+            except Exception:
+                continue
+
+        # 回退：简介
+        m = re.search(r'"desc":"([^"]{30,})"', html)
+        if m:
+            desc = m.group(1).replace("\\n", " ").replace("\\/", "/")
+            return _truncate_text(unescape(desc), max_chars)
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_youtube_published_date(url):
+    """
+    从 YouTube 页面解析发布时间（优先）。
+    """
+    try:
+        resp = safe_request(url, timeout=ARTICLE_FETCH_TIMEOUT)
+        if not resp:
+            return ""
+        html = resp.text
+
+        m = re.search(r'"publishDate":"(\d{4}-\d{2}-\d{2})"', html)
+        if m:
+            return m.group(1)
+        m = re.search(r'"uploadDate":"(\d{4}-\d{2}-\d{2})"', html)
+        if m:
+            return m.group(1)
+        m = re.search(r'"datePublished":"(\d{4}-\d{2}-\d{2})"', html)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_bilibili_published_date(url):
+    """
+    从 B 站页面解析发布时间（优先）。
+    """
+    try:
+        resp = safe_request(url, timeout=ARTICLE_FETCH_TIMEOUT, headers={"Referer": "https://www.bilibili.com/"})
+        if not resp:
+            return ""
+        html = resp.text
+
+        # pubdate 可能是 unix 时间戳
+        m = re.search(r'"pubdate":\s*(\d{10})', html)
+        if m:
+            ts = int(m.group(1))
+            return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%Y-%m-%d")
+
+        m = re.search(r'"pub_time":"(\d{4}-\d{2}-\d{2})', html)
+        if m:
+            return m.group(1)
+        m = re.search(r'"datePublished":"(\d{4}-\d{2}-\d{2})"', html)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return ""
+
+
+def fetch_content_context(item, max_chars=ARTICLE_EXCERPT_MAX_CHARS):
+    """
+    统一上下文抓取入口：
+    1) 普通新闻页：正文抽取
+    2) 视频/社媒页：优先字幕，其次页面描述，最后标题+摘要（防幻觉）
+    """
+    url = item.get("url", "")
+    title = item.get("title", "")
+    summary = item.get("summary", "")
+    source = item.get("source", "")
+    domain = urlparse(url).netloc.lower()
+
+    # YouTube 字幕优先
+    if "youtube.com" in domain or "youtu.be" in domain:
+        sub = _extract_youtube_subtitles(url, max_chars=max_chars)
+        if sub:
+            item["_context_mode"] = "subtitle"
+            return sub
+        item["_context_mode"] = "title_only"
+        return _truncate_text(f"{title}。{summary}", max_chars)
+
+    # B站字幕优先
+    if "bilibili.com" in domain or "b23.tv" in domain:
+        sub = _extract_bilibili_subtitles(url, max_chars=max_chars)
+        if sub:
+            item["_context_mode"] = "subtitle"
+            return sub
+        item["_context_mode"] = "title_only"
+        return _truncate_text(f"{title}。{summary}", max_chars)
+
+    # 微博/Twitter/X 优先走标题+摘要，避免页面动态结构导致空抓取
+    if any(x in domain for x in ["weibo.com", "twitter.com", "x.com"]):
+        item["_context_mode"] = "title_only"
+        return _truncate_text(f"{title}。{summary}", max_chars)
+
+    # 非社媒页走正文抓取
+    article_text = fetch_article_excerpt(url, max_chars=max_chars)
+    if article_text:
+        item["_context_mode"] = "article"
+        return article_text
+
+    item["_context_mode"] = "title_only"
+    return _truncate_text(f"{title}。{summary}", max_chars)
+
+
+def fetch_article_excerpt(url, max_chars=ARTICLE_EXCERPT_MAX_CHARS):
+    """
+    抓取文章页面并提取正文文本摘要。
+    为 LLM 生成摘要提供充分的原文上下文，从根源上减少幻觉。
+    """
+    try:
+        resp = safe_request(url, timeout=ARTICLE_FETCH_TIMEOUT)
+        if not resp:
+            return ""
+        html = resp.text
+
+        # 移除 script / style / nav / footer 等无关标签
+        for tag in ["script", "style", "nav", "footer", "header", "aside", "noscript"]:
+            html = re.sub(
+                rf"<{tag}[^>]*>.*?</{tag}>", "", html, flags=re.DOTALL | re.IGNORECASE
+            )
+
+        # 移除 HTML 注释
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
+
+        # 优先提取 <article> 或 <main> 标签内容
+        article_match = re.search(
+            r"<(?:article|main)[^>]*>(.*?)</(?:article|main)>",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        if article_match:
+            content_html = article_match.group(1)
+        else:
+            # 回退：提取 <p> 标签内容
+            paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", html, flags=re.DOTALL | re.IGNORECASE)
+            content_html = " ".join(paragraphs)
+
+        # 清除剩余 HTML 标签
+        text = re.sub(r"<[^>]+>", " ", content_html)
+        # 清除多余空白 + HTML 实体解码
+        text = unescape(re.sub(r"\s+", " ", text).strip())
+
+        if len(text) < 50:
+            return ""
+
+        return _truncate_text(text, max_chars)
+    except Exception as e:
+        print(f"      [v3.0] 文章正文抓取失败 ({url[:60]}...): {e}")
+        return ""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# A. 聚合源抓取（优先执行）
+# v3.0 新增：摘要事实校验（检测明显的公司-模型错误归属）
+# ══════════════════════════════════════════════════════════════════════════════
+
+def validate_summary_facts(title_zh, summary_zh, article_text=""):
+    """
+    校验生成的摘要中是否存在明显的公司-模型错误归属。
+    返回 (is_valid, error_msg)
+    """
+    combined = f"{title_zh} {summary_zh}"
+    errors = []
+
+    # 检测模式："{公司A}的{模型B}"，其中模型B实际不属于公司A
+    # 常见错误归属模式
+    attribution_patterns = [
+        # "Meta的Opus" / "Meta的Claude"
+        (r"Meta.{0,5}(?:Opus|Claude|Sonnet|Haiku)", "Claude/Opus 系列属于 Anthropic，不属于 Meta"),
+        # "Google的GPT" / "Google的ChatGPT"
+        (r"Google.{0,5}(?:GPT|ChatGPT|DALL-E|Sora)", "GPT/ChatGPT 系列属于 OpenAI，不属于 Google"),
+        # "OpenAI的Gemini"
+        (r"OpenAI.{0,5}(?:Gemini|Bard|PaLM|Gemma)", "Gemini 系列属于 Google，不属于 OpenAI"),
+        # "Anthropic的GPT"
+        (r"Anthropic.{0,5}(?:GPT|ChatGPT|Llama|Gemini)", "GPT 属于 OpenAI，Llama 属于 Meta，Gemini 属于 Google"),
+        # "Meta的Gemini"
+        (r"Meta.{0,5}Gemini", "Gemini 属于 Google，不属于 Meta"),
+        # "OpenAI的Llama"
+        (r"OpenAI.{0,5}Llama", "Llama 属于 Meta，不属于 OpenAI"),
+        # "Google的Llama"
+        (r"Google.{0,5}Llama", "Llama 属于 Meta，不属于 Google"),
+        # "Meta的GLM"
+        (r"Meta.{0,5}GLM", "GLM 属于智谱AI，不属于 Meta"),
+        # "OpenAI的GLM"
+        (r"OpenAI.{0,5}GLM", "GLM 属于智谱AI，不属于 OpenAI"),
+        # "百度的Qwen/通义"
+        (r"百度.{0,5}(?:Qwen|通义千问)", "通义千问/Qwen 属于阿里，不属于百度"),
+        # "阿里的文心"
+        (r"阿里.{0,5}文心", "文心一言属于百度，不属于阿里"),
+    ]
+
+    for pattern, msg in attribution_patterns:
+        if re.search(pattern, combined, re.IGNORECASE):
+            errors.append(msg)
+
+    if errors:
+        return False, "; ".join(errors)
+    return True, ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# A. 聚合源抓取
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fetch_tldr():
-    """TLDR.tech AI — 核心国际聚合源。"""
     items = []
     source = "TLDR.tech"
     today = datetime.now(BEIJING_TZ)
@@ -559,9 +1292,7 @@ def fetch_tldr():
     tracker.record(source, items)
     return items
 
-
 def _parse_tldr_page(html, date_str, source):
-    """解析 TLDR 详情页内容。"""
     items = []
     links = re.findall(
         r'<a[^>]+href="(https?://(?!tldr\.tech)[^"]+)"[^>]*>\s*([^<]+?)\s*</a>',
@@ -578,6 +1309,7 @@ def _parse_tldr_page(html, date_str, source):
             and "sponsor" not in title.lower()
             and not is_github_url(url)
             and not GITHUB_TITLE_FILTER.search(title)
+            and not HARD_BLOCK_DOMAINS.search(url)
         ):
             seen.add(url)
             items.append({
@@ -591,9 +1323,7 @@ def _parse_tldr_page(html, date_str, source):
             })
     return items
 
-
 def fetch_hackernews():
-    """Hacker News API — 筛选 AI 相关高分帖子。"""
     items = []
     source = "Hacker News"
     try:
@@ -611,7 +1341,21 @@ def fetch_hackernews():
             if not story or story.get("type") != "story":
                 continue
             title = story.get("title", "")
-            url = story.get("url", f"https://news.ycombinator.com/item?id={sid}")
+            original_url = story.get("url", f"https://news.ycombinator.com/item?id={sid}")
+            hn_url = f"https://news.ycombinator.com/item?id={sid}"
+            url = original_url
+
+            # ══════════════════════════════════════════════════════════════
+            # ★ v3.1 修改：HackerNews 映射修复（增强版，新增产品官网自动检测）
+            # ══════════════════════════════════════════════════════════════
+            if (PRODUCT_LANDING_FILTER.search(url) or
+                PRODUCT_SITE_DOMAINS.search(url) or
+                HARD_BLOCK_DOMAINS.search(url) or
+                "claude.com" in url or
+                "anthropic.com" in url or
+                _is_product_homepage(url)):        # ← v3.1 新增：通用产品官网自动检测
+                url = hn_url
+
             hn_score = story.get("score", 0)
 
             if not (AI_KEYWORDS.search(title) or AI_KEYWORDS.search(url)):
@@ -644,9 +1388,7 @@ def fetch_hackernews():
     tracker.record(source, items)
     return items
 
-
 def fetch_wired_ai():
-    """Wired AI — 优质国际科技媒体。"""
     source = "Wired"
     items = parse_rss_feed(
         "https://www.wired.com/feed/tag/ai/latest/rss",
@@ -666,13 +1408,11 @@ def fetch_wired_ai():
     tracker.record(source, items)
     return items
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # B. 国际权威媒体抓取
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fetch_techcrunch():
-    """TechCrunch AI RSS feed。"""
     source = "TechCrunch"
     items = parse_rss_feed(
         "https://techcrunch.com/category/artificial-intelligence/feed/",
@@ -684,9 +1424,7 @@ def fetch_techcrunch():
     tracker.record(source, items)
     return items
 
-
 def fetch_theverge():
-    """The Verge AI RSS feed。"""
     source = "The Verge"
     items = parse_rss_feed(
         "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
@@ -701,13 +1439,12 @@ def fetch_theverge():
             max_items=10,
             ai_filter=False,
         )
+    items = [it for it in items if not is_theverge_paywalled(it)]
     items = [it for it in items if not is_github_url(it["url"])]
     tracker.record(source, items)
     return items
 
-
 def fetch_venturebeat():
-    """VentureBeat AI RSS feed。"""
     source = "VentureBeat"
     items = parse_rss_feed(
         "https://venturebeat.com/category/ai/feed/",
@@ -726,9 +1463,7 @@ def fetch_venturebeat():
     tracker.record(source, items)
     return items
 
-
 def fetch_arstechnica():
-    """Ars Technica AI RSS feed。"""
     source = "Ars Technica"
     items = parse_rss_feed(
         "https://feeds.arstechnica.com/arstechnica/technology-lab",
@@ -747,9 +1482,7 @@ def fetch_arstechnica():
     tracker.record(source, items)
     return items
 
-
 def fetch_mit_tech_review():
-    """MIT Technology Review AI。"""
     source = "MIT Tech Review"
     items = parse_rss_feed(
         "https://www.technologyreview.com/feed/",
@@ -768,9 +1501,7 @@ def fetch_mit_tech_review():
     tracker.record(source, items)
     return items
 
-
 def fetch_ieee_spectrum():
-    """IEEE Spectrum AI — 面向工程师的技术媒体。"""
     source = "IEEE Spectrum"
     items = parse_rss_feed(
         "https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss",
@@ -790,13 +1521,11 @@ def fetch_ieee_spectrum():
     tracker.record(source, items)
     return items
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # C. 国内权威媒体抓取
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fetch_jiqizhixin():
-    """机器之心 — 国内 AI 领域最权威的专业媒体之一。"""
     source = "机器之心"
     items = []
     try:
@@ -816,9 +1545,7 @@ def fetch_jiqizhixin():
     tracker.record(source, items)
     return items
 
-
 def _scrape_jiqizhixin():
-    """爬取机器之心首页文章列表。"""
     source = "机器之心"
     items = []
     try:
@@ -839,14 +1566,19 @@ def _scrape_jiqizhixin():
             if url not in seen and len(title) >= 8:
                 if is_github_url(url) or GITHUB_TITLE_FILTER.search(title):
                     continue
+                if FOOTER_TEXT_FILTER.search(title):
+                    continue
                 seen.add(url)
+                extracted_date = extract_date_from_url(url)
                 items.append({
                     "title": title,
                     "url": url,
                     "summary": "via 机器之心",
                     "source": source,
                     "source_type": "domestic",
-                    "date": datetime.now(BEIJING_TZ).strftime("%Y-%m-%d"),
+                    "date": extracted_date or _now_iso(),
+                    "date_inferred": not bool(extracted_date),
+                    "fetched_at": _now_iso(),
                     "score": 0,
                 })
                 if len(items) >= 15:
@@ -855,9 +1587,7 @@ def _scrape_jiqizhixin():
         print(f"  [WARN] 机器之心 scrape failed: {e}")
     return items
 
-
 def fetch_qbitai():
-    """量子位 — 国内头部 AI 科技媒体。"""
     source = "量子位"
     items = []
     try:
@@ -885,9 +1615,7 @@ def fetch_qbitai():
     tracker.record(source, items)
     return items
 
-
 def fetch_36kr():
-    """36氪 AI 频道 — 国内领先的科技商业媒体。"""
     source = "36氪"
     items = []
     for url in [
@@ -915,9 +1643,7 @@ def fetch_36kr():
     tracker.record(source, items)
     return items
 
-
 def fetch_ithome():
-    """IT之家 AI 频道 — 综合科技资讯媒体。"""
     source = "IT之家"
     items = []
     try:
@@ -943,24 +1669,31 @@ def fetch_ithome():
     tracker.record(source, items)
     return items
 
-
 def fetch_xinzhiyuan():
-    """新智元 — 国内 AI 行业资讯媒体。"""
     source = "新智元"
-    items = scrape_links_from_page(
+    items = []
+    for url in [
+        "https://www.xinzhiyuan.com/",
+        "https://www.xinzhiyuan.com/category/ai/",
         "https://www.aihub.cn/",
-        source_name=source,
-        title_min_len=8,
-        max_items=10,
-        ai_filter=False,
-    )
+    ]:
+        try:
+            items = scrape_links_from_page(
+                url,
+                source_name=source,
+                title_min_len=8,
+                max_items=10,
+                ai_filter=False,
+            )
+            if items:
+                break
+        except Exception:
+            continue
     items = [it for it in items if not is_github_url(it["url"])]
     tracker.record(source, items)
     return items
 
-
 def fetch_infoq():
-    """InfoQ AI前线 — 面向开发者的技术媒体。"""
     source = "InfoQ"
     items = scrape_links_from_page(
         "https://www.infoq.cn/topic/AI",
@@ -973,11 +1706,10 @@ def fetch_infoq():
     tracker.record(source, items)
     return items
 
-
 def fetch_sina_tech():
-    """新浪科技 — 综合性科技新闻门户。"""
     source = "新浪科技"
     items = []
+    warmup_sina_homepage()
     try:
         items = parse_rss_feed(
             "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2515&k=&num=30&page=1",
@@ -989,21 +1721,28 @@ def fetch_sina_tech():
         pass
 
     if not items:
-        items = scrape_links_from_page(
-            "https://tech.sina.com.cn/ai/",
-            source_name=source,
-            title_min_len=8,
-            max_items=12,
-            ai_filter=False,
-        )
+        for url in [
+            "https://tech.sina.com.cn/",
+            "https://tech.sina.com.cn/roll/",
+        ]:
+            try:
+                items = scrape_links_from_page(
+                    url,
+                    source_name=source,
+                    title_min_len=8,
+                    max_items=12,
+                    ai_filter=True,
+                )
+                if items:
+                    break
+            except Exception:
+                continue
 
     items = [it for it in items if not is_github_url(it["url"])]
     tracker.record(source, items)
     return items
 
-
 def fetch_toutiao():
-    """今日头条科技频道 — 大众科技资讯。"""
     source = "今日头条"
     items = scrape_links_from_page(
         "https://www.toutiao.com/ch/news_tech/",
@@ -1016,9 +1755,7 @@ def fetch_toutiao():
     tracker.record(source, items)
     return items
 
-
 def fetch_thepaper():
-    """澎湃新闻科技频道 — 深度报道类媒体。"""
     source = "澎湃新闻"
     items = scrape_links_from_page(
         "https://www.thepaper.cn/channel_25951",
@@ -1032,30 +1769,238 @@ def fetch_thepaper():
     return items
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# D. 补充搜索（当抓取源不足时启用）
-# ══════════════════════════════════════════════════════════════════════════════
+def fetch_youtube():
+    source = "YouTube"
+    items = []
+
+    # 1) 优先使用用户显式配置的官方频道 feed
+    if YOUTUBE_FEED_URLS:
+        items.extend(
+            parse_rss_feed_candidates(
+                urls=YOUTUBE_FEED_URLS,
+                source_name=source,
+                max_entries=10,
+                ai_filter=False,
+            )
+        )
+
+    # 2) Google News 站内检索（无需 API key）
+    if not items:
+        items.extend(
+            _fetch_google_news_site(
+                "youtube.com",
+                source_name=source,
+                extra_queries=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    # 3) RSSHub 关键词检索（可选）
+    if len(items) < 5:
+        items.extend(
+            _fetch_rsshub_keyword(
+                route_template="youtube/keyword/{keyword}",
+                source_name=source,
+                keywords=SOCIAL_PRACTICAL_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    for it in items:
+        k = it.get("url", "").rstrip("/")
+        if not k or k in seen:
+            continue
+        # 先尝试从视频页提取真实发布时间，提升命中率
+        page_date = _extract_youtube_published_date(it.get("url", ""))
+        if page_date:
+            it["date"] = page_date
+            it["date_inferred"] = False
+        if not is_within_days(it.get("date"), VIDEO_MAX_AGE_DAYS):
+            continue
+        # YouTube 视频必须有可解析发布时间，防止用抓取时间冒充
+        if it.get("date_inferred"):
+            continue
+        seen.add(k)
+        dedup.append(_mark_social_item(it, platform="YouTube", is_video=True))
+
+    tracker.record(source, dedup)
+    return dedup
+
+
+def fetch_bilibili():
+    source = "B站"
+    items = []
+
+    items.extend(
+        _fetch_google_news_site(
+            "bilibili.com",
+            source_name=source,
+            extra_queries=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+            max_entries=8,
+        )
+    )
+
+    if len(items) < 5:
+        items.extend(
+            _fetch_rsshub_keyword(
+                route_template="bilibili/search/{keyword}",
+                source_name=source,
+                keywords=SOCIAL_PRACTICAL_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    for it in items:
+        k = it.get("url", "").rstrip("/")
+        if not k or k in seen:
+            continue
+        page_date = _extract_bilibili_published_date(it.get("url", ""))
+        if page_date:
+            it["date"] = page_date
+            it["date_inferred"] = False
+        if not is_within_days(it.get("date"), VIDEO_MAX_AGE_DAYS):
+            continue
+        if it.get("date_inferred"):
+            continue
+        seen.add(k)
+        dedup.append(_mark_social_item(it, platform="Bilibili", is_video=True))
+
+    tracker.record(source, dedup)
+    return dedup
+
+
+def fetch_weibo():
+    source = "微博"
+    items = _fetch_google_news_site(
+        "weibo.com",
+        source_name=source,
+        extra_queries=SOCIAL_PRACTICAL_QUERIES,
+        max_entries=8,
+    )
+
+    if len(items) < 5:
+        items.extend(
+            _fetch_rsshub_keyword(
+                route_template="weibo/search/{keyword}",
+                source_name=source,
+                keywords=SOCIAL_PRACTICAL_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    for it in items:
+        k = it.get("url", "").rstrip("/")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        dedup.append(_mark_social_item(it, platform="Weibo", is_video=False))
+
+    tracker.record(source, dedup)
+    return dedup
+
+
+def fetch_twitter():
+    source = "Twitter"
+    items = _fetch_nitter_search(
+        source_name=source,
+        keywords=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+        max_entries=8,
+    )
+
+    if not items:
+        items = _fetch_google_news_site(
+            "twitter.com",
+            source_name=source,
+            extra_queries=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+            max_entries=8,
+        )
+
+    if len(items) < 5:
+        items.extend(
+            _fetch_rsshub_keyword(
+                route_template="twitter/search/{keyword}",
+                source_name=source,
+                keywords=SOCIAL_PRACTICAL_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    for it in items:
+        original_url = it.get("url", "")
+        it["url"] = normalize_social_url(original_url)
+        k = it.get("url", "").rstrip("/")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        dedup.append(_mark_social_item(it, platform="Twitter", is_video=False))
+
+    tracker.record(source, dedup)
+    return dedup
+
+
+def fetch_x():
+    source = "X"
+    items = _fetch_nitter_search(
+        source_name=source,
+        keywords=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+        max_entries=8,
+    )
+
+    if not items:
+        items = _fetch_google_news_site(
+            "x.com",
+            source_name=source,
+            extra_queries=SOCIAL_PRACTICAL_QUERIES + MODEL_INNOVATION_QUERIES,
+            max_entries=8,
+        )
+
+    # X 与 Twitter 在 RSSHub 中通常复用 twitter 路由
+    if len(items) < 5:
+        items.extend(
+            _fetch_rsshub_keyword(
+                route_template="twitter/search/{keyword}",
+                source_name=source,
+                keywords=SOCIAL_PRACTICAL_QUERIES,
+                max_entries=8,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    for it in items:
+        original_url = it.get("url", "")
+        it["url"] = normalize_social_url(original_url)
+        k = it.get("url", "").rstrip("/")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        dedup.append(_mark_social_item(it, platform="X", is_video=False))
+
+    tracker.record(source, dedup)
+    return dedup
+
 
 def supplementary_search_intl():
-    """国际源补充：使用搜索 API 补充。"""
     print("  [INFO] 国际源不足，尝试补充搜索...")
-    items = []
-    return items
-
+    return []
 
 def supplementary_search_domestic():
-    """国内源补充：使用搜索接口补充国内 AI 新闻。"""
     print("  [INFO] 国内源不足，尝试补充搜索...")
-    items = []
-    return items
-
+    return []
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 标题相似度去重
 # ══════════════════════════════════════════════════════════════════════════════
 
 def title_similarity(t1, t2):
-    """计算两个标题的相似度 (0.0 ~ 1.0)。"""
     def normalize(t):
         t = t.lower().strip()
         t = re.sub(r"[^\w\s\u4e00-\u9fff]", "", t)
@@ -1067,26 +2012,116 @@ def title_similarity(t1, t2):
         return 0.0
     return SequenceMatcher(None, n1, n2).ratio()
 
-
 def is_duplicate_title(new_title, existing_titles, threshold=0.65):
-    """检查新标题是否与已有标题重复。"""
     for existing in existing_titles:
         if title_similarity(new_title, existing) > threshold:
             return True
     return False
 
 
+def extract_content_fingerprint(item):
+    """
+    跨来源同事件去重指纹：
+    1) URL slug 关键词
+    2) 标题归一化关键词
+    """
+    title = (item.get("title") or "").lower()
+    url = (item.get("url") or "").lower()
+
+    # 取 URL 最后两段路径中的字母数字 token
+    path = urlparse(url).path or ""
+    segments = [s for s in path.split("/") if s][-2:]
+    tokens = []
+    for seg in segments:
+        tokens.extend(re.findall(r"[a-z0-9\u4e00-\u9fff]{3,}", seg))
+
+    # 加入标题 token
+    tokens.extend(re.findall(r"[a-z0-9\u4e00-\u9fff]{3,}", title))
+
+    # 去掉常见噪声词
+    stop = {
+        "https", "http", "www", "com", "cn", "html", "shtml", "tech", "news",
+        "article", "post", "video", "ai", "the", "and", "for", "with",
+    }
+    tokens = [t for t in tokens if t not in stop]
+    if not tokens:
+        return ""
+    # 保留前10个关键词作为指纹
+    return "|".join(sorted(set(tokens))[:10])
+
+
+def practical_relevance_score(item):
+    title = item.get("title", "")
+    summary = item.get("summary", "")
+    title_zh = item.get("title_zh", "")
+    summary_zh = item.get("summary_zh", "")
+    url = item.get("url", "")
+    text = f"{title} {summary} {title_zh} {summary_zh}"
+
+    score = 0
+    if PRACTICAL_SIGNAL.search(text):
+        score += 3
+    if REUSABLE_SIGNAL.search(text):
+        score += 2
+    if INNOVATION_SIGNAL.search(text):
+        score += 2
+    if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
+        score += 2
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+        score += 2
+    if TECH_BOOST.search(text):
+        score += 1
+    if HOT_ENTITY.search(text):
+        score += 1
+
+    if LOW_VALUE_SIGNAL.search(text):
+        score -= 3
+    if FUNDING_POLICY_FILTER.search(text):
+        score -= 2
+    if ENTERPRISE_BIZ_FILTER.search(text):
+        score -= 2
+
+    # 社媒/视频来源如果没有实践信号，额外降权，减少“标题党”进入
+    if (item.get("is_social") or SOCIAL_VIDEO_DOMAINS.search(url)) and not PRACTICAL_SIGNAL.search(text):
+        score -= 2
+
+    return score
+
+
+def is_practical_candidate(item):
+    """
+    实用硬门槛：
+    - 命中实践/复用信号，或
+    - 命中创新信号且同时出现模型/应用信号
+    """
+    text = f"{item.get('title', '')} {item.get('summary', '')} {item.get('title_zh', '')} {item.get('summary_zh', '')}"
+    practical_hit = bool(PRACTICAL_SIGNAL.search(text))
+    reusable_hit = bool(REUSABLE_SIGNAL.search(text))
+    innovation_hit = bool(INNOVATION_SIGNAL.search(text))
+    model_hit = bool(MODEL_SIGNAL.search(text))
+    app_hit = bool(APPLICATION_SIGNAL.search(text))
+
+    if practical_hit or reusable_hit:
+        return True
+    if innovation_hit and (model_hit or app_hit):
+        return True
+    return False
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 质量筛选（含融资/政策限流 + 产品官网标记 + 硬封禁 + 非技术向过滤 + 企业商务过滤）
+# 质量筛选
 # ══════════════════════════════════════════════════════════════════════════════
 
 def quality_filter(items):
-    """过滤低质量内容（含融资/政策限流 + 产品官网标记 + 硬封禁域名过滤 + 非技术向过滤 + 企业商务过滤）。"""
     filtered = []
     today = datetime.now(BEIJING_TZ)
     funding_policy_count = 0
     non_tech_filtered_count = 0
     enterprise_biz_filtered_count = 0
+    practical_filtered_count = 0
+    hard_practical_filtered_count = 0
+    # 日期无法解析/超过时效统计
+    date_missing_filtered_count = 0
+    old_date_filtered_count = 0
 
     for item in items:
         title = item.get("title", "")
@@ -1103,40 +2138,84 @@ def quality_filter(items):
             continue
         if SOFT_AD_FILTER.search(text):
             continue
+        # ★ v3.1 拦截底部备案文本
+        if FOOTER_TEXT_FILTER.search(title):
+            continue
+            
         if len(title) < 8:
             continue
         if PAPER_FILTER.search(title) or PAPER_FILTER.search(url):
             continue
         if FALSE_POSITIVE_FILTER.search(title):
             continue
-        if item.get("date"):
-            try:
-                date_str = item["date"]
-                if isinstance(date_str, str) and re.match(r"\d{4}-\d{2}-\d{2}", date_str):
-                    article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
-                    article_date = article_date.replace(tzinfo=BEIJING_TZ)
-                    if (today - article_date).days > OLD_NEWS_DAYS:
-                        continue
-            except (ValueError, TypeError):
-                pass
+
+        # ══════════════════════════════════════════════════════════════
+        # ★ v3.2 修改：72小时时效性过滤（修复日期缺失静默放行问题）
+        # ══════════════════════════════════════════════════════════════
+        date_val = item.get("date")
+        if not date_val:
+            # 兜底：使用抓取时间，避免大规模误杀
+            date_val = item.get("fetched_at", _now_iso())
+            item["date"] = date_val
+            item["date_inferred"] = True
+
+        try:
+            date_str = date_val
+            article_date = None
+            if isinstance(date_str, str):
+                if "T" in date_str:
+                    article_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(BEIJING_TZ)
+                elif re.match(r"\d{4}-\d{2}-\d{2}", date_str):
+                    article_date = datetime.strptime(date_str[:10], "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+                else:
+                    try:
+                        article_date = parsedate_to_datetime(date_str).astimezone(BEIJING_TZ)
+                    except Exception:
+                        pass
+
+            if article_date:
+                if (today - article_date).total_seconds() > OLD_NEWS_HOURS * 3600:
+                    old_date_filtered_count += 1
+                    continue
+            else:
+                # 日期格式无法解析时，回退为抓取时间并打标记
+                item["date"] = item.get("fetched_at", _now_iso())
+                item["date_inferred"] = True
+                date_missing_filtered_count += 1
+        except Exception:
+            item["date"] = item.get("fetched_at", _now_iso())
+            item["date_inferred"] = True
+            date_missing_filtered_count += 1
 
         if FUNDING_POLICY_FILTER.search(text):
             funding_policy_count += 1
             if funding_policy_count > MAX_FUNDING_POLICY:
                 continue
 
-        # ── v2.6 新增：非技术向内容过滤 ──
         if NON_TECH_FILTER.search(text) and not AI_EXEMPT.search(text):
             non_tech_filtered_count += 1
             continue
 
-        # ── v2.7 新增：企业商务类新闻过滤 ──
         if ENTERPRISE_BIZ_FILTER.search(text):
             enterprise_biz_filtered_count += 1
             continue
 
-        if PRODUCT_LANDING_FILTER.search(url) or PRODUCT_SITE_DOMAINS.search(url):
-            item["_is_product_landing"] = True
+        # 🚀 严格拦截：只要匹配到产品特征，或者被智能识别为产品首页，直接丢弃！
+        if PRODUCT_LANDING_FILTER.search(url) or PRODUCT_SITE_DOMAINS.search(url) or _is_product_homepage(url):
+            continue  # 直接跳过，不加入 filtered 列表
+
+        pscore = practical_relevance_score(item)
+        item["practical_score"] = pscore
+        if PRACTICAL_STRICT_ONLY:
+            if not is_practical_candidate(item):
+                hard_practical_filtered_count += 1
+                continue
+            dynamic_threshold = PRACTICAL_MIN_SCORE
+            if item.get("is_social") or SOCIAL_VIDEO_DOMAINS.search(url):
+                dynamic_threshold += 0
+            if pscore < dynamic_threshold:
+                practical_filtered_count += 1
+                continue
 
         filtered.append(item)
 
@@ -1144,20 +2223,24 @@ def quality_filter(items):
         print(f"      [v2.6] 非技术向内容过滤: {non_tech_filtered_count} 条")
     if enterprise_biz_filtered_count > 0:
         print(f"      [v2.7] 企业商务类新闻过滤: {enterprise_biz_filtered_count} 条")
+    if practical_filtered_count > 0:
+        print(f"      [v3.3] 实用/复用/创新不足过滤: {practical_filtered_count} 条")
+    if hard_practical_filtered_count > 0:
+        print(f"      [v3.3] 未命中实用硬门槛过滤: {hard_practical_filtered_count} 条")
+    if date_missing_filtered_count > 0:
+        print(f"      [v3.3] 日期缺失/解析失败（已兜底）: {date_missing_filtered_count} 条")
+    if old_date_filtered_count > 0:
+        print(f"      [v3.2] 超过72小时过滤: {old_date_filtered_count} 条")
+    # 视频站（B站/YouTube）由来源抓取阶段执行 5 天内硬过滤
 
     return filtered
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 综合热度评分
-# ══════════════════════════════════════════════════════════════════════════════
-
 def calculate_heat_score(item):
-    """计算综合热度评分。"""
     base_score = item.get("score", 0)
     source = item.get("source", "")
     title = item.get("title", "")
     summary = item.get("summary", "")
+    practical_score = item.get("practical_score", 0)
     text = f"{title} {summary}"
 
     if source == "Hacker News" and base_score > 0:
@@ -1173,20 +2256,29 @@ def calculate_heat_score(item):
         heat -= 30
     if PRACTICE_BOOST.search(text):
         heat += 25
+    if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
+        heat += 18
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+        heat += 22
+    if practical_score > 0:
+        heat += practical_score * 12
+    if item.get("is_social") and practical_score < PRACTICAL_MIN_SCORE:
+        heat -= 40
 
     return heat
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 去重与排序（含热度排序 + 产品官网过滤 + 多样性约束）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def deduplicate_and_rank(all_items):
-    """智能去重与排序。"""
     items = quality_filter(all_items)
 
     for item in items:
         item["heat_score"] = calculate_heat_score(item)
+        # 偏好信息更完整的来源（摘要更长、非聚合跳转）
+        completeness = len((item.get("summary") or "").strip())
+        if "news.google.com" in (item.get("url") or ""):
+            completeness -= 80
+        if item.get("is_social"):
+            completeness += 20
+        item["_completeness"] = completeness
 
     items = [
         it for it in items
@@ -1194,22 +2286,46 @@ def deduplicate_and_rank(all_items):
         or it.get("heat_score", 0) >= PRODUCT_HEAT_THRESHOLD
     ]
 
+    # ── 加载历史记录，进行隔日去重 ──
+    history_urls = load_history()
     seen_urls = set()
     seen_titles = []
+    seen_fingerprints = {}
     deduped = []
 
-    items.sort(key=lambda x: x.get("heat_score", 0), reverse=True)
+    items.sort(
+        key=lambda x: (x.get("heat_score", 0), x.get("_completeness", 0)),
+        reverse=True,
+    )
 
     for item in items:
         url = item["url"].rstrip("/")
         title = item.get("title", "")
+        fp = extract_content_fingerprint(item)
 
         if not title:
             continue
-        if url in seen_urls:
+        if url in seen_urls or url in history_urls:
             continue
         if is_duplicate_title(title, seen_titles):
             continue
+
+        # 同事件跨来源只保留最优一条（热度+信息完整度）
+        if fp:
+            prev = seen_fingerprints.get(fp)
+            if prev is not None:
+                old_score = prev.get("heat_score", 0) + prev.get("_completeness", 0) / 100.0
+                new_score = item.get("heat_score", 0) + item.get("_completeness", 0) / 100.0
+                if new_score > old_score:
+                    try:
+                        deduped.remove(prev)
+                    except ValueError:
+                        pass
+                    seen_fingerprints[fp] = item
+                else:
+                    continue
+            else:
+                seen_fingerprints[fp] = item
 
         seen_urls.add(url)
         seen_titles.append(title)
@@ -1217,9 +2333,7 @@ def deduplicate_and_rank(all_items):
 
     return enforce_diversity(deduped)
 
-
 def enforce_diversity(items):
-    """执行来源多样性约束。"""
     source_groups = {}
     for item in items:
         src = item["source"]
@@ -1269,31 +2383,80 @@ def enforce_diversity(items):
 
     return final[:MAX_ITEMS]
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Ollama 生成中文标题与摘要（v2.3 核心修复：逐条调用，彻底消除错位）
+# Ollama 生成中文标题与摘要（v3.0 重构）
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _generate_single_summary(item, index, total):
-    """
-    v2.3 新增：为单条资讯生成中文标题和摘要。
-    逐条调用 Ollama，确保生成结果与原始新闻一一对应，彻底消除 ID 错位问题。
-    """
     src_info = get_source_info(item["source"])
     src_tag = "国内" if src_info["type"] == "domestic" else "国际"
 
+    # ── v3.3：按来源类型抽取上下文（新闻正文 / 视频字幕 / 标题兜底） ──
+    article_excerpt = fetch_content_context(item)
+    context_mode = item.get("_context_mode", "article")
+    has_article = bool(article_excerpt)
+    context_label_map = {
+        "article": "文章正文",
+        "subtitle": "视频字幕",
+        "title_only": "标题与来源摘要",
+    }
+    context_label = context_label_map.get(context_mode, "资讯上下文")
+
+    # ── v3.0 新增：构建已知实体映射参考 ──
+    entity_reference = (
+        "【已知AI公司-模型归属表（严格遵守，禁止混淆）】\n"
+        "- Anthropic → Claude、Opus、Sonnet、Haiku\n"
+        "- OpenAI → GPT、ChatGPT、DALL-E、Sora、o1、o3\n"
+        "- Google → Gemini、Bard、PaLM、Gemma、Veo\n"
+        "- Meta → Llama、LLaMA、SAM\n"
+        "- Mistral → Mistral、Mixtral\n"
+        "- xAI → Grok\n"
+        "- 智谱AI/Zhipu → GLM、ChatGLM、CogView\n"
+        "- 百度 → 文心一言、ERNIE\n"
+        "- 阿里 → 通义千问、Qwen\n"
+        "- 字节跳动 → 豆包、Doubao\n"
+        "- 月之暗面 → Kimi、Moonshot\n"
+        "- DeepSeek → DeepSeek\n"
+        "- 百川智能 → Baichuan\n"
+        "- Stability AI → Stable Diffusion\n"
+        "- Nvidia → NeMo、Nemotron\n"
+        "- Microsoft → Copilot、Phi\n"
+    )
+
+    # ── v3.0 修改：增强版 Prompt，包含原文上下文和反幻觉规则 ──
+    article_context_section = ""
+    if has_article:
+        article_context_section = f"""
+【{context_label}（最重要的参考依据，摘要必须基于此内容）】：
+{article_excerpt}
+"""
+
     prompt = f"""你是资深AI行业记者，精通中英文。将以下资讯转化为中文精华版。
 
-重要规则：
-1. 先判断是否真正与AI/人工智能直接相关
-2. 国际新闻：不要简单翻译英文标题，要提炼中文读者最关心的信息点，适当补充"对中国市场/开发者的影响"
-3. 国内新闻：突出事件的行业影响和背景，避免公关稿式堆砌
-4. 融资类、政策法规类新闻，除非涉及重大事件（如超10亿美元融资或全球性法规），否则标记 ai_related: false
-5. 产品发布要说明核心功能和与竞品的差异
-6. 技术突破要说明实际意义和潜在应用场景
+{entity_reference}
+
+⚠️ 最重要的规则 —— 反幻觉/反捏造：
+1. 【严禁捏造归属关系】绝对不能将一个公司的模型/产品错误归属给另一个公司。
+   例如：Claude/Opus 是 Anthropic 的，不是 Meta 的；Llama 是 Meta 的，不是 OpenAI 的。
+   如果你不确定某个模型属于哪家公司，就不要在摘要中写归属关系。
+2. 【严格基于原文】标题和摘要必须严格基于下方提供的原始资讯内容和文章正文（如有），
+   不得添加原文中没有的事实、数据、或公司关系。
+3. 【宁缺毋错】如果原文信息不足以判断具体细节，用更概括的表述代替，
+   绝不能编造具体数字、公司名称、模型归属等关键信息。
+
+其他规则：
+4. 先判断是否真正与AI/人工智能直接相关
+5. 国际新闻：不要简单翻译英文标题，要提炼中文读者最关心的信息点
+6. 国内新闻：突出事件的行业影响和背景，避免公关稿式堆砌
+7. 融资类、政策法规类新闻，除非涉及重大事件，否则标记 ai_related: false
+8. 产品发布要说明核心功能和与竞品的差异
+9. 技术突破要说明实际意义和潜在应用场景
+10. 只保留“可学习、可复用、可实践”的信息；纯观点、纯营销、纯八卦，标记 ai_related: false
+11. 如果上下文是“标题与来源摘要”（没有正文/字幕），摘要必须使用保守表述，不得编造细节或数据
+12. 如果来源是视频平台，优先依据字幕；无字幕时仅基于标题和描述总结，不得幻想
 
 返回以下JSON（只输出JSON，不要输出其他任何内容）：
-{{"ai_related":true,"emoji":"🤖","title_zh":"中文标题15-25字，像新闻编辑写的标题，不要直译","summary_zh":"中文摘要50-100字，回答这件事为什么重要和对行业有什么影响","category":"分类标签"}}
+{{"ai_related":true,"practical_reusable":true,"emoji":"🤖","title_zh":"中文标题15-25字，像新闻编辑写的标题，不要直译","summary_zh":"中文摘要50-100字，严格基于原文，回答这件事为什么重要","category":"分类标签"}}
 
 分类标签从以下选择：技术突破/融资/产品发布/政策法规/行业变动/应用落地/开源/研究
 
@@ -1301,9 +2464,12 @@ def _generate_single_summary(item, index, total):
 好摘要示例：「据华尔街日报调查，Sora 上线仅半年，全球用户从百万骤降至不足50万，每日运营成本高达100万美元。这揭示了AI视频生成领域叫好不叫座的残酷现实。」
 
 注意：title_zh和summary_zh都必须是中文，绝对不能是英文！
-
-资讯：
-{item['title']} | {item['summary']} | 来源:{item['source']}({src_tag})"""
+{article_context_section}
+资讯元信息：
+标题: {item['title']}
+RSS摘要: {item['summary']}
+来源: {item['source']}({src_tag})
+URL: {item['url']}"""
 
     try:
         resp = requests.post(OLLAMA_URL, json={
@@ -1314,10 +2480,8 @@ def _generate_single_summary(item, index, total):
         }, timeout=120)
         text = resp.json()["message"]["content"].strip()
 
-        # 提取 JSON 对象（单个 {} 而非数组）
         json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
         if not json_match:
-            # 尝试匹配嵌套的 JSON
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
 
         if json_match:
@@ -1328,11 +2492,74 @@ def _generate_single_summary(item, index, total):
                 print(f"      [{index}/{total}] 🚫 非AI相关，已过滤: {item['title'][:40]}")
                 return
 
-            item["title_zh"] = r.get("title_zh", item["title"])
-            item["summary_zh"] = r.get("summary_zh", item["summary"])
+            if not r.get("practical_reusable", True):
+                item["_remove"] = True
+                print(f"      [{index}/{total}] 🚫 非实用/不可复用，已过滤: {item['title'][:40]}")
+                return
+
+            title_zh = r.get("title_zh", item["title"])
+            summary_zh = r.get("summary_zh", item["summary"])
+
+            # ── v3.0 新增：事实校验 ──
+            is_valid, error_msg = validate_summary_facts(
+                title_zh, summary_zh, article_excerpt
+            )
+            if not is_valid:
+                print(f"      [{index}/{total}] ⚠️ 事实校验不通过: {error_msg}")
+                print(f"      [{index}/{total}] 🔄 触发重新生成（去除错误归属）...")
+
+                # 重新生成：在 prompt 中追加纠错指令
+                correction_prompt = (
+                    f"\n\n⚠️ 你上次生成的摘要存在严重事实错误：{error_msg}\n"
+                    f"请重新生成，严格按照【已知AI公司-模型归属表】纠正错误。\n"
+                    f"上次错误的输出：标题=\"{title_zh}\"，摘要=\"{summary_zh}\"\n"
+                    f"请输出修正后的JSON："
+                )
+
+                try:
+                    retry_resp = requests.post(OLLAMA_URL, json={
+                        "model": OLLAMA_MODEL,
+                        "messages": [
+                            {"role": "user", "content": prompt},
+                            {"role": "assistant", "content": text},
+                            {"role": "user", "content": correction_prompt},
+                        ],
+                        "stream": False,
+                        "options": {"temperature": 0.1},
+                    }, timeout=120)
+                    retry_text = retry_resp.json()["message"]["content"].strip()
+                    retry_match = re.search(r'\{[^{}]*\}', retry_text, re.DOTALL)
+                    if retry_match:
+                        r2 = json.loads(retry_match.group())
+                        title_zh = r2.get("title_zh", title_zh)
+                        summary_zh = r2.get("summary_zh", summary_zh)
+
+                        # 二次校验
+                        is_valid_2, error_msg_2 = validate_summary_facts(
+                            title_zh, summary_zh, article_excerpt
+                        )
+                        if not is_valid_2:
+                            print(f"      [{index}/{total}] ❌ 二次校验仍不通过，强制移除错误归属")
+                            # 强制清除已知的错误归属文本
+                            for pattern_str, _ in [
+                                (r"Meta.{0,5}(?:Opus|Claude|Sonnet|Haiku)", ""),
+                                (r"Google.{0,5}(?:GPT|ChatGPT|DALL-E|Sora)", ""),
+                                (r"OpenAI.{0,5}(?:Gemini|Bard|PaLM|Gemma)", ""),
+                            ]:
+                                title_zh = re.sub(pattern_str, "", title_zh, flags=re.IGNORECASE).strip()
+                                summary_zh = re.sub(pattern_str, "", summary_zh, flags=re.IGNORECASE).strip()
+                        else:
+                            print(f"      [{index}/{total}] ✅ 二次生成通过校验")
+                except Exception as e2:
+                    print(f"      [{index}/{total}] ❌ 重新生成失败: {e2}")
+
+            item["title_zh"] = title_zh
+            item["summary_zh"] = summary_zh
             item["emoji_override"] = r.get("emoji", "")
             item["category"] = r.get("category", "AI")
-            print(f"      [{index}/{total}] ✅ {item['title_zh'][:40]}")
+
+            context_flag = {"article": "📄", "subtitle": "🎞️", "title_only": "🧾"}.get(context_mode, "📋")
+            print(f"      [{index}/{total}] ✅ {context_flag} {item['title_zh'][:40]}")
         else:
             print(f"      [{index}/{total}] ⚠️ JSON解析失败，使用原文: {item['title'][:40]}")
             item["title_zh"] = item["title"]
@@ -1342,26 +2569,20 @@ def _generate_single_summary(item, index, total):
         item["title_zh"] = item["title"]
         item["summary_zh"] = item["summary"]
 
-
 def generate_chinese_summaries(items):
-    """
-    v2.3 核心修复：逐条调用 Ollama 生成中文标题和摘要。
-    """
     total = len(items)
     print(f"      逐条调用 Ollama ({OLLAMA_MODEL})，共 {total} 条...")
+    print(f"      [v3.3] 已启用文章正文/视频字幕抓取 + 实用导向 + 反幻觉校验")
 
     for i, item in enumerate(items, 1):
         _generate_single_summary(item, i, total)
-        # 适当间隔，避免 Ollama 过载
         if i < total:
             time.sleep(0.5)
 
-    # 移除被标记为非AI相关的条目
     filtered_count = sum(1 for it in items if it.get("_remove"))
     items = [it for it in items if not it.get("_remove")]
     print(f"      完成: {total} 条已处理, {filtered_count} 条被过滤为非AI相关")
 
-    # 兜底：确保所有条目都有中文字段
     for item in items:
         if "title_zh" not in item:
             item["title_zh"] = item["title"]
@@ -1372,21 +2593,17 @@ def generate_chinese_summaries(items):
 
     return items
 
-
-def _fallback_titles(items):
-    """Ollama 失败时的降级方案：直接用原文。"""
-    for item in items:
-        item["title_zh"] = item["title"]
-        item["summary_zh"] = item["summary"]
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# 标签推断（增强版）
+# 标签推断
 # ══════════════════════════════════════════════════════════════════════════════
 
 TAG_RULES = [
     (re.compile(r"llm|gpt|claude|gemini|model|mistral|anthropic|openai|大模型|qwen|glm|deepseek|baichuan", re.I),
      "大模型", "tag-llm", "\U0001f916"),
+    (re.compile(r"教程|实战|部署|接入|workflow|agent|RAG|自动化|复用|模板|api|sdk|落地|案例", re.I),
+     "实用", "tag-product", "\U0001f6e0\ufe0f"),
+    (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|混音|母带|转写", re.I),
+     "音频AI", "tag-product", "\U0001f3a7"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
     (re.compile(r"open.?source|hugging|apache|mit.license|开源", re.I),
@@ -1409,28 +2626,6 @@ TAG_RULES = [
      "国产AI", "tag-domestic", "\U0001f3ee"),
 ]
 
-SOURCE_EMOJI = {
-    "Hacker News": "\U0001f525",
-    "TechCrunch": "\U0001f4f0",
-    "TLDR.tech": "\U0001f4e8",
-    "The Verge": "\U0001f4f1",
-    "VentureBeat": "\U0001f4ca",
-    "Ars Technica": "\U0001f4bb",
-    "MIT Tech Review": "\U0001f393",
-    "IEEE Spectrum": "\U0001f4e1",
-    "Wired": "\U0001f310",
-    "机器之心": "\U0001f916",
-    "量子位": "\u26a1",
-    "36氪": "\U0001f4b9",
-    "IT之家": "\U0001f4f1",
-    "新智元": "\U0001f31f",
-    "InfoQ": "\U0001f4bb",
-    "新浪科技": "\U0001f4f0",
-    "今日头条": "\U0001f4f1",
-    "澎湃新闻": "\U0001f4e1",
-}
-
-
 def infer_tags(item):
     text = f"{item['title']} {item.get('summary', '')} {item.get('title_zh', '')} {item.get('summary_zh', '')}"
     tags = []
@@ -1441,17 +2636,14 @@ def infer_tags(item):
         tags.append(("AI", "tag-other", "\u2728"))
     return tags[:3]
 
-
 def pick_emoji(item):
-    """优先用 Ollama 返回的 emoji，否则按标签规则推断。"""
     if item.get("emoji_override"):
         return item["emoji_override"]
     tags = infer_tags(item)
     return tags[0][2]
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# HTML 生成  （v2.8 修改：新增国际/国内 Tab 切换功能）
+# HTML 生成
 # ══════════════════════════════════════════════════════════════════════════════
 
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -1504,7 +2696,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-size: 13px;
             color: rgba(255,255,255,0.7);
         }}
-        /* ── v2.8 新增：Tab 切换样式 ── */
         .tabs {{
             display: flex;
             justify-content: center;
@@ -1552,7 +2743,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .tab-content.active {{
             display: block;
         }}
-        /* ── Tab 切换样式结束 ── */
         .cards-grid {{
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -1674,41 +2864,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <span class="stat">{source_count} 个来源</span>
             </div>
         </div>
-        <!-- v2.8 新增：Tab 切换按钮 -->
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
             <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
         </div>
-        <!-- v2.8 新增：国际资讯 Tab 内容 -->
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
 {intl_cards}
             </div>
         </div>
-        <!-- v2.8 新增：国内资讯 Tab 内容 -->
         <div id="tab-domestic" class="tab-content">
             <div class="cards-grid">
 {domestic_cards}
             </div>
         </div>
         <div class="footer">
-            \U0001f955 由 AI'm OK v2.8 自动生成 | {date} | 国内外 {source_count} 源聚合
+            \U0001f955 由 AI'm OK v3.2 自动生成 | {date} | 国内外 {source_count} 源聚合
         </div>
     </div>
-    <!-- v2.8 新增：Tab 切换 JavaScript -->
     <script>
         function switchTab(tab, btn) {{
-            // 隐藏所有 tab 内容
             document.querySelectorAll('.tab-content').forEach(function(el) {{
                 el.classList.remove('active');
             }});
-            // 取消所有按钮激活态
             document.querySelectorAll('.tab-btn').forEach(function(el) {{
                 el.classList.remove('active');
             }});
-            // 显示目标 tab
             document.getElementById('tab-' + tab).classList.add('active');
-            // 激活目标按钮
             btn.classList.add('active');
         }}
     </script>
@@ -1726,9 +2908,7 @@ CARD_TEMPLATE = """            <a class="card" href="{url}" target="_blank" rel=
                 </div>
             </a>"""
 
-
 def _build_card_html(item):
-    """为单个新闻条目生成卡片 HTML。"""
     tags = infer_tags(item)
     tags_html = "".join(
         f'<span class="tag {css}">{escape(label)}</span>' for label, css, emoji in tags
@@ -1748,9 +2928,7 @@ def _build_card_html(item):
         source_icon=source_icon,
     )
 
-
 def generate_html(items, date_str):
-    """v2.8 修改：生成带 Tab 切换的 HTML，国际/国内资讯分开展示。"""
     intl_items = [it for it in items if it.get("source_type") != "domestic"]
     domestic_items = [it for it in items if it.get("source_type") == "domestic"]
 
@@ -1771,9 +2949,8 @@ def generate_html(items, date_str):
         source_count=source_count,
     )
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# 飞书推送（v2.7 修改：「国际」→「🌐国际资讯」，「国内」→「🏮国内资讯」）
+# 飞书推送
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_feishu_card(items, date_str):
@@ -1782,8 +2959,6 @@ def build_feishu_card(items, date_str):
     total_count = len(items)
     feishu_count = len(feishu_items)
 
-    intl_count = sum(1 for it in feishu_items if it.get("source_type") != "domestic")
-    domestic_count = sum(1 for it in feishu_items if it.get("source_type") == "domestic")
     source_count = len(set(it["source"] for it in feishu_items))
 
     intl_items = [it for it in feishu_items if it.get("source_type") != "domestic"]
@@ -1792,7 +2967,6 @@ def build_feishu_card(items, date_str):
     elements = []
 
     def _append_news_items(news_items):
-        """将一组新闻条目添加到 elements 中。"""
         for i, item in enumerate(news_items):
             tags = infer_tags(item)
             tag_str = " | ".join(label for label, _, _ in tags)
@@ -1808,7 +2982,7 @@ def build_feishu_card(items, date_str):
             })
             elements.append({
                 "tag": "markdown",
-                "content": f"<font color='indigo'>**{title_zh}**</font>",
+                "content": f"<font color='indigo'>{title_zh}</font>",
                 "text_size": "large",
             })
             elements.append({
@@ -1873,7 +3047,6 @@ def build_feishu_card(items, date_str):
             "content": f"由 AI'm OK 自动生成 | {date_str} | {source_count}源聚合 | 飞书精选Top{feishu_count}",
         }],
     })
-   
 
     return {
         "msg_type": "interactive",
@@ -1889,26 +3062,24 @@ def build_feishu_card(items, date_str):
         },
     }
 
-
 def push_feishu(payload):
-    try:
-        resp = requests.post(
-            FEISHU_WEBHOOK,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=15,
-        )
-        result = resp.json()
-        if result.get("StatusCode") == 0 or result.get("code") == 0:
-            print("[OK] Feishu push succeeded ✅")
-        else:
-            print(f"[WARN] Feishu response: {result}")
-    except Exception as e:
-        print(f"[ERROR] Feishu push failed: {e}")
-
+    for i, webhook in enumerate(FEISHU_WEBHOOKS, 1):
+        try:
+            resp = requests.post(
+                webhook.strip(),
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=15,
+            )
+            result = resp.json()
+            if result.get("StatusCode") == 0 or result.get("code") == 0:
+                print(f"[OK] Feishu push succeeded ✅ -> 群{i}")
+            else:
+                print(f"[WARN] Feishu response -> 群{i}: {result}")
+        except Exception as e:
+            print(f"[ERROR] Feishu push failed -> 群{i}: {e}")
 
 def publish_to_pages(html_content, date_str):
-    """将 HTML 推送到 GitHub Pages 仓库。"""
     try:
         pages = PAGES_DIR
         (pages / "latest.html").write_text(html_content, encoding="utf-8")
@@ -1926,7 +3097,6 @@ def publish_to_pages(html_content, date_str):
     except Exception as e:
         print(f"[WARN] GitHub Pages push failed: {e}")
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 主流程
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1934,100 +3104,41 @@ def publish_to_pages(html_content, date_str):
 def main():
     today = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
     print(f"\n{'='*60}")
-    print(f"  🥕AI'm OK v2.8 | {today}")
-    print(f"  多源聚合 · 逐条摘要 · 热度排序 · 技术优先 · 非技术过滤 · 企业商务过滤 · 融资政策限流 · 产品官网过滤 · 硬封禁 · PDF过滤 · Tab切换")
+    print(f"  🥕AI'm OK v3.3 | {today}")
+    print(f"  多源聚合 · 实用导向筛选 · 视频字幕抽取 · 反幻觉校验 · 72h时效 · 隔日去重")
     print(f"{'='*60}\n")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase A: 聚合源抓取（优先执行）
-    # ═══════════════════════════════════════════════════════════
     print("📡 [Phase A] 聚合源抓取...")
-
-    print("  [A1] TLDR.tech AI (核心国际聚合源)...")
     tldr = fetch_tldr()
-    print(f"       → {len(tldr)} items")
-
-    print("  [A2] Hacker News...")
     hn = fetch_hackernews()
-    print(f"       → {len(hn)} items")
-
-    print("  [A3] Wired AI...")
     wired = fetch_wired_ai()
-    print(f"       → {len(wired)} items")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase B: 国际权威媒体抓取
-    # ═══════════════════════════════════════════════════════════
     print("\n📰 [Phase B] 国际权威媒体抓取...")
-
-    print("  [B1] TechCrunch AI...")
     tc = fetch_techcrunch()
-    print(f"       → {len(tc)} items")
-
-    print("  [B2] The Verge AI...")
     tv = fetch_theverge()
-    print(f"       → {len(tv)} items")
-
-    print("  [B3] Ars Technica AI...")
     ars = fetch_arstechnica()
-    print(f"       → {len(ars)} items")
-
-    print("  [B4] VentureBeat AI...")
     vb = fetch_venturebeat()
-    print(f"       → {len(vb)} items")
-
-    print("  [B5] MIT Tech Review AI...")
     mit = fetch_mit_tech_review()
-    print(f"       → {len(mit)} items")
-
-    print("  [B6] IEEE Spectrum AI...")
     ieee = fetch_ieee_spectrum()
-    print(f"       → {len(ieee)} items")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase C: 国内权威媒体抓取
-    # ═══════════════════════════════════════════════════════════
+    print("\n🎬 [Phase B.5] 社媒与视频平台抓取（实用导向）...")
+    yt = fetch_youtube()
+    tw = fetch_twitter()
+    xsrc = fetch_x()
+    bz = fetch_bilibili()
+    wb = fetch_weibo()
+
     print("\n🏮 [Phase C] 国内权威媒体抓取...")
-
-    print("  [C1] 机器之心...")
     jqzx = fetch_jiqizhixin()
-    print(f"       → {len(jqzx)} items")
-
-    print("  [C2] 量子位...")
     qb = fetch_qbitai()
-    print(f"       → {len(qb)} items")
-
-    print("  [C3] 36氪 AI频道...")
     kr = fetch_36kr()
-    print(f"       → {len(kr)} items")
-
-    print("  [C4] IT之家 AI频道...")
     ith = fetch_ithome()
-    print(f"       → {len(ith)} items")
-
-    print("  [C5] 新智元...")
     xzy = fetch_xinzhiyuan()
-    print(f"       → {len(xzy)} items")
-
-    print("  [C6] InfoQ AI前线...")
     iq = fetch_infoq()
-    print(f"       → {len(iq)} items")
-
-    print("  [C7] 新浪科技...")
     sina = fetch_sina_tech()
-    print(f"       → {len(sina)} items")
-
-    print("  [C8] 今日头条科技...")
     tt = fetch_toutiao()
-    print(f"       → {len(tt)} items")
-
-    print("  [C9] 澎湃新闻科技...")
     pp = fetch_thepaper()
-    print(f"       → {len(pp)} items")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase D: 抓取状态检查 + 补充搜索
-    # ═══════════════════════════════════════════════════════════
     print("\n📊 [Phase D] 抓取状态检查...")
     tracker.print_report()
 
@@ -2035,18 +3146,14 @@ def main():
     supp_domestic = []
     if tracker.intl_success_count < MIN_INTL_SUCCESS:
         supp_intl = supplementary_search_intl()
-        print(f"       补充国际搜索: {len(supp_intl)} items")
     if tracker.domestic_success_count < MIN_DOMESTIC_SUCCESS:
         supp_domestic = supplementary_search_domestic()
-        print(f"       补充国内搜索: {len(supp_domestic)} items")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase E: 合并、去重、排序
-    # ═══════════════════════════════════════════════════════════
-    print("\n🔄 [Phase E] 合并去重排序（热度排序 + 非技术过滤 + 企业商务过滤 + 产品官网过滤 + 硬封禁 + PDF过滤）...")
+    print("\n🔄 [Phase E] 合并去重排序（实用筛选 + 热度排序 + 72小时 + 隔日去重）...")
     all_items = (
         tldr + hn + wired +
         tc + tv + ars + vb + mit + ieee +
+        yt + tw + xsrc + bz + wb +
         jqzx + qb + kr + ith + xzy + iq +
         sina + tt + pp +
         supp_intl + supp_domestic
@@ -2054,44 +3161,41 @@ def main():
     print(f"      Total raw: {len(all_items)}")
 
     final = deduplicate_and_rank(all_items)
-    print(f"      After dedup + diversity + heat sort + non-tech filter + enterprise biz filter + product filter + hard block + PDF filter: {len(final)}")
-
-    # 打印来源分布
-    source_dist = {}
-    for it in final:
-        src = it["source"]
-        source_dist[src] = source_dist.get(src, 0) + 1
-    print("      来源分布:")
-    for src, cnt in sorted(source_dist.items(), key=lambda x: -x[1]):
-        icon = get_source_info(src)["icon"]
-        print(f"        {icon} {src}: {cnt}")
-
-    print("      热度 Top 5:")
-    for i, item in enumerate(final[:5], 1):
-        heat = item.get("heat_score", 0)
-        print(f"        {i}. [heat={heat}] {item['title'][:50]}")
+    print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
 
     if not final:
         print("[ERROR] No items fetched. Check network. ❌")
         return
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase F: 生成中文摘要（v2.3：逐条调用）
-    # ═══════════════════════════════════════════════════════════
-    print(f"\n✍️  [Phase F] Generating Chinese summaries (逐条模式)...")
+    print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
     final = generate_chinese_summaries(final)
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase G: 生成 HTML（v2.8：网页版含 Tab 切换，分国际/国内展示）
-    # ═══════════════════════════════════════════════════════════
+     # ══════════════════════════════════════════════════════════════
+    # ★ 新增 Phase F.5：本地 Web 审核（传入 --auto 参数可跳过）
+    # ══════════════════════════════════════════════════════════════
+    if "--auto" not in sys.argv and start_review_server is not None:
+        print("\n🔍 [Phase F.5] 启动本地审核页面...")
+        final = start_review_server(
+            items=final,
+            infer_tags_func=infer_tags,
+            pick_emoji_func=pick_emoji,
+            get_source_info_func=get_source_info,
+            port=18088,
+        )
+        if not final:
+            print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
+            return
+        print(f"      审核后保留 {len(final)} 条，继续推送流程...")
+    elif "--auto" not in sys.argv and start_review_server is None:
+        print("\n⏩ [Phase F.5] 未找到 review_server.py，自动跳过人工审核")
+    else:
+        print("\n⏩ [Phase F.5] --auto 模式，跳过人工审核")
+
     html = generate_html(final, today)
     output_path = OUTPUT_DIR / f"AI-m-OK-{today}.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
-    # ═══════════════════════════════════════════════════════════
-    # Phase H: 发布（飞书仅推送Top10，网页版推送全部）
-    # ═══════════════════════════════════════════════════════════
     print("\n🚀 [Phase H] Publishing...")
     publish_to_pages(html, today)
 
@@ -2099,27 +3203,17 @@ def main():
     push_feishu(card)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
-    # ═══════════════════════════════════════════════════════════
-    # 完成摘要
-    # ═══════════════════════════════════════════════════════════
+    # ── 保存本次推送记录，用于后续隔日去重 ──
+    pushed_urls = {it["url"].rstrip("/") for it in final}
+    save_history(pushed_urls)
+    print(f"      已保存 {len(pushed_urls)} 条推送记录到历史文件，防止隔日重复推送。")
+
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
     dom_final = sum(1 for it in final if it.get("source_type") == "domestic")
     print(f"\n{'='*60}")
     print(f"  ✅ Done! {len(final)} items ({intl_final} intl + {dom_final} domestic)")
-    print(f"  📡 Sources: {len(source_dist)}")
     print(f"  📲 飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条热点")
-    print(f"  🌐 网页版: 全部 {len(final)} 条资讯（Tab切换：国际/国内）")
-    print(f"{'='*60}")
-
-    print(f"\n  Top 5 Stories (by heat score):")
-    for i, item in enumerate(final[:5], 1):
-        src_info = get_source_info(item["source"])
-        title = item.get("title_zh", item["title"])
-        heat = item.get("heat_score", 0)
-        print(f"    {i}. {src_info['icon']} [{src_info['display']}] [🔥{heat}] {title}")
-
-    print(f"\n  🥕AI'm OK v2.8 — All done!\n")
-
+    print(f"{'='*60}\n")
 
 if __name__ == "__main__":
     main()
