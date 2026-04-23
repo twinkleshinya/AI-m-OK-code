@@ -61,7 +61,7 @@ def print(*args, **kwargs):  # type: ignore[override]
 
 FEISHU_WEBHOOKS = os.environ.get(
     "FEISHU_WEBHOOKS",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00"
+    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00,https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646"
 ).split(",")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
