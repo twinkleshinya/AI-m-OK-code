@@ -324,7 +324,7 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
     if x.strip()
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
-WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "8" if FAST_FETCH_MODE else "17"))
+WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
