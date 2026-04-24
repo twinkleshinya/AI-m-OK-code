@@ -24,7 +24,7 @@ from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from html import escape, unescape
 from pathlib import Path
-from urllib.parse import quote_plus, urlparse, urljoin, parse_qs, unquote
+from urllib.parse import quote_plus, urlparse, urljoin, parse_qs, unquote, urlencode
 from email.utils import parsedate_to_datetime
 
 import feedparser
@@ -85,6 +85,13 @@ STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
 POOL_A_MIN_PUSH = int(os.environ.get("POOL_A_MIN_PUSH", "10"))
+AUTO_GITHUB_BACKUP = os.environ.get("AUTO_GITHUB_BACKUP", "1").strip().lower() not in {"0", "false", "no"}
+SCRIPT_BACKUP_BRANCH = os.environ.get("SCRIPT_BACKUP_BRANCH", "main").strip() or "main"
+SCRIPT_BACKUP_TARGETS = [
+    x.strip()
+    for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
+    if x.strip()
+]
 
 # ── 数量与多样性约束 ──
 MAX_ITEMS = 26
@@ -100,12 +107,15 @@ OLD_NEWS_HOURS = 72
 MAX_FUNDING_POLICY = 2
 PRODUCT_HEAT_THRESHOLD = 90
 FEISHU_TOP_N = 15
+FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
 PRACTICAL_MIN_SCORE = int(os.environ.get("PRACTICAL_MIN_SCORE", "2"))
 VIDEO_MAX_AGE_DAYS = int(os.environ.get("VIDEO_MAX_AGE_DAYS", "30"))
 YOUTUBE_MAX_AGE_DAYS = int(os.environ.get("YOUTUBE_MAX_AGE_DAYS", "30"))
+YOUTUBE_REQUIRE_CONFIDENT_DATE = os.environ.get("YOUTUBE_REQUIRE_CONFIDENT_DATE", "1").strip().lower() not in {"0", "false", "no"}
+YOUTUBE_ALLOW_SEARCH_REL_FALLBACK = os.environ.get("YOUTUBE_ALLOW_SEARCH_REL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
 
 # ── 社媒/视频抓取源配置（v3.3） ──
 RSSHUB_BASES = [
@@ -171,10 +181,20 @@ WECHAT_OFFICIAL_ACCOUNTS = [
     x.strip()
     for x in os.environ.get(
         "WECHAT_OFFICIAL_ACCOUNTS",
-        "摩丁创想,风亭韵律,audiokinetic官方,玫瑰细嗅蔷薇,智能科学与技术学报,AIGEL-人工智能绿色探索实验室,机器之心,量子位,新智元,腾讯研究院,腾讯云开发者,阿里云,百度智能云,极客公园,InfoQ,AI寒武纪,甲子光年"
+        "摩丁创想,风亭韵律,audiokinetic官方,玫瑰细嗅蔷薇,智能科学与技术学报,AIGEL-人工智能绿色探索实验室,"
+        "机器之心,量子位,新智元,腾讯研究院,腾讯云开发者,阿里云,百度智能云,极客公园,InfoQ,AI寒武纪,甲子光年,"
+        "智东西,AI科技大本营,AI前线,PaperWeekly,机器学习算法与Python学习,夕小瑶科技说,DataFunTalk,"
+        "深度学习自然语言处理,AIGC开放社区,大模型之家,将门创投,硅星人Pro,Founder Park,晚点LatePost,"
+        "阿虚同学,AI随想录,悟空 AI 应用笔记,小昂成长馆,宇航酱,园丁创意编程,Y行记,船长AI视界,游戏葡萄,"
+        "CUHK学长Jack,优设AIGC,上和弦,Pioneer先锋中国,立惑,数字未来事务所,FYC富友昌,电影声音网Filmsound.cn,"
+        "AI产品阿颖,艾话连篇,AI竹笋集,牛哥谈Ai,数字生命卡兹克,MacTalk,九月AI学习笔记,阿枫科技,算法社,"
+        "AI工具派,罗斯基,游戏陀螺,美股研究社,加百力,IEEE电气电子工程师学会,Second Sentience,游戏花火,"
+        "电子咖啡,游戏茶馆,游戏进化论,游戏研究社,Z Potentials,游戏日报,差评X.PIN,竞核,逛逛GitHub,莫理,尘红,"
+        "AI大模型调参指北笔记,绿联NAS私有云,非凡产研,测试工程化,AI音频时代,HsuDan,AI前锋团,钻进盒子里,工具驯兽师,资源设,科技探幽"
     ).split(",")
     if x.strip()
 ]
+WECHAT_OFFICIAL_ACCOUNTS = list(dict.fromkeys(WECHAT_OFFICIAL_ACCOUNTS))
 WECHAT_PRIORITY_ACCOUNTS = {
     "摩丁创想",
     "风亭韵律",
@@ -182,6 +202,12 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "玫瑰细嗅蔷薇",
     "智能科学与技术学报",
     "AIGEL-人工智能绿色探索实验室",
+    "机器之心",
+    "量子位",
+    "新智元",
+    "AI科技大本营",
+    "PaperWeekly",
+    "夕小瑶科技说",
 }
 
 AUDIO_CREATOR_PAGES = [
@@ -229,10 +255,70 @@ AUDIO_MUSIC_DOMAIN_LIMIT = int(os.environ.get("AUDIO_MUSIC_DOMAIN_LIMIT", "5" if
 FRONTIER_DOMAIN_LIMIT = int(os.environ.get("FRONTIER_DOMAIN_LIMIT", "6" if FAST_FETCH_MODE else "11"))
 DEEP_PAGE_DATE_IN_LISTING = os.environ.get("DEEP_PAGE_DATE_IN_LISTING", "0").strip().lower() in {"1", "true", "yes"}
 WECHAT_SEARCH_QUERY_LIMIT = int(os.environ.get("WECHAT_SEARCH_QUERY_LIMIT", "8" if FAST_FETCH_MODE else "16"))
-WECHAT_ENABLE_GOOGLE_NEWS = os.environ.get("WECHAT_ENABLE_GOOGLE_NEWS", "0" if FAST_FETCH_MODE else "1").strip().lower() in {"1", "true", "yes"}
+WECHAT_ENABLE_GOOGLE_NEWS = os.environ.get("WECHAT_ENABLE_GOOGLE_NEWS", "1").strip().lower() in {"1", "true", "yes"}
 WECHAT_ENABLE_RSSHUB = os.environ.get("WECHAT_ENABLE_RSSHUB", "0").strip().lower() in {"1", "true", "yes"}
 WECHAT_ENABLE_SOGOU = os.environ.get("WECHAT_ENABLE_SOGOU", "1").strip().lower() in {"1", "true", "yes"}
 WECHAT_ENABLE_BING = os.environ.get("WECHAT_ENABLE_BING", "1").strip().lower() in {"1", "true", "yes"}
+WECHAT_ENABLE_WERSS = os.environ.get("WECHAT_ENABLE_WERSS", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_ENV_FILE = os.environ.get("WERSS_ENV_FILE", "").strip()
+WERSS_ENV_CANDIDATES = [
+    WERSS_ENV_FILE,
+    r"E:\jiangxy2\werss\.env",
+    str(Path.home() / "werss" / ".env"),
+]
+
+def _read_simple_env_file(path):
+    vals = {}
+    if not path:
+        return vals
+    try:
+        p = Path(path)
+        if not p.exists():
+            return vals
+        for raw_line in p.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key:
+                vals[key] = val
+    except Exception:
+        return {}
+    return vals
+
+WERSS_LOCAL_ENV = {}
+for _werss_env_path in WERSS_ENV_CANDIDATES:
+    WERSS_LOCAL_ENV = _read_simple_env_file(_werss_env_path)
+    if WERSS_LOCAL_ENV:
+        break
+
+WERSS_BASES = [
+    x.strip().rstrip("/")
+    for x in os.environ.get("WERSS_BASES", "http://127.0.0.1:8001,http://localhost:8001").split(",")
+    if x.strip()
+]
+WERSS_USERNAME = os.environ.get(
+    "WERSS_USERNAME",
+    os.environ.get("WE_MP_RSS_USERNAME", WERSS_LOCAL_ENV.get("WERSS_USERNAME", WERSS_LOCAL_ENV.get("USERNAME", ""))),
+).strip()
+WERSS_PASSWORD = os.environ.get(
+    "WERSS_PASSWORD",
+    os.environ.get("WE_MP_RSS_PASSWORD", WERSS_LOCAL_ENV.get("WERSS_PASSWORD", WERSS_LOCAL_ENV.get("PASSWORD", ""))),
+).strip()
+WERSS_TOKEN = os.environ.get("WERSS_TOKEN", os.environ.get("WE_MP_RSS_TOKEN", "")).strip()
+WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "40"))
+WERSS_AUTO_SUBSCRIBE = os.environ.get("WERSS_AUTO_SUBSCRIBE", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_AUTOSUBSCRIBE_LIMIT = int(os.environ.get("WERSS_AUTOSUBSCRIBE_LIMIT", str(len(WECHAT_OFFICIAL_ACCOUNTS))))
+WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
+    x.strip()
+    for x in os.environ.get("WERSS_AUTOSUBSCRIBE_ACCOUNTS", ",".join(WECHAT_OFFICIAL_ACCOUNTS)).split(",")
+    if x.strip()
+]
+WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "8" if FAST_FETCH_MODE else "17"))
+WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "5"))
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
 
@@ -814,20 +900,131 @@ REQUEST_HOST_LAST_TS = {}
 # 历史记录管理（用于隔日去重）
 # ══════════════════════════════════════════════════════════════════════════════
 
-def load_history():
-    """加载已推送的历史 URL 记录"""
-    if HISTORY_FILE.exists():
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except Exception:
-            return set()
-    return set()
+def normalize_title_key(title):
+    t = str(title or "").lower().strip()
+    t = re.sub(r"[^\w\s\u4e00-\u9fff]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
-def save_history(new_urls):
-    """保存推送记录，保留最近 1000 条防止文件过大"""
+
+def canonicalize_url_for_history(url):
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        u = urlparse(raw)
+        scheme = (u.scheme or "https").lower()
+        host = (u.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        path = re.sub(r"/+", "/", u.path or "/").rstrip("/") or "/"
+        query = parse_qs(u.query, keep_blank_values=False)
+
+        # YouTube 只保留核心 video id，避免参数变化造成重复推送
+        if host in {"youtube.com", "m.youtube.com"} and path == "/watch":
+            v = (query.get("v") or [""])[0].strip()
+            if v:
+                return f"{scheme}://youtube.com/watch?v={v}"
+        if host == "youtu.be":
+            vid = path.strip("/")
+            if vid:
+                return f"{scheme}://youtube.com/watch?v={vid}"
+
+        # 微信文章保留 sn 能稳定区分文章
+        if host == "mp.weixin.qq.com" and path == "/s":
+            keep = {}
+            for k in ("sn", "__biz", "mid", "idx"):
+                val = (query.get(k) or [""])[0].strip()
+                if val:
+                    keep[k] = val
+            if keep:
+                return f"{scheme}://{host}{path}?{urlencode(sorted(keep.items()))}"
+            return f"{scheme}://{host}{path}"
+
+        drop_prefix = ("utm_",)
+        drop_keys = {
+            "spm", "from", "from_source", "source", "ref", "refer", "referer",
+            "fbclid", "gclid", "igshid", "mkt_tok", "si", "feature", "ab_channel",
+            "isappinstalled", "cmpid", "mc_cid", "mc_eid", "sessionid",
+        }
+        kept = {}
+        for k, values in query.items():
+            lk = k.lower()
+            if lk in drop_keys or any(lk.startswith(p) for p in drop_prefix):
+                continue
+            if not values:
+                continue
+            v = str(values[0]).strip()
+            if v:
+                kept[lk] = v
+
+        q = urlencode(sorted(kept.items())) if kept else ""
+        return f"{scheme}://{host}{path}" + (f"?{q}" if q else "")
+    except Exception:
+        return raw.rstrip("/")
+
+
+def history_keys_from_item(item):
+    keys = set()
+    url_key = canonicalize_url_for_history(item.get("url", ""))
+    if url_key:
+        keys.add(f"url::{url_key}")
+    title = item.get("title_zh") or item.get("title") or ""
+    title_key = normalize_title_key(title)
+    if title_key:
+        keys.add(f"title::{title_key}")
+    fp = extract_content_fingerprint(item)
+    if fp:
+        keys.add(f"fp::{fp}")
+    return keys
+
+
+def _normalize_history_entries(raw_data):
+    entries = raw_data if isinstance(raw_data, list) else []
+    normalized = set()
+    for entry in entries:
+        if isinstance(entry, str):
+            s = entry.strip()
+            if not s:
+                continue
+            if "::" in s:
+                normalized.add(s)
+            else:
+                url = canonicalize_url_for_history(s)
+                if url:
+                    normalized.add(f"url::{url}")
+        elif isinstance(entry, dict):
+            url = canonicalize_url_for_history(entry.get("url", ""))
+            if url:
+                normalized.add(f"url::{url}")
+            title_key = normalize_title_key(entry.get("title") or entry.get("title_zh") or "")
+            if title_key:
+                normalized.add(f"title::{title_key}")
+            fp = str(entry.get("fp", "") or "").strip()
+            if fp:
+                normalized.add(f"fp::{fp}")
+    return normalized
+
+
+def load_history():
+    """加载已推送历史（URL/标题/指纹）"""
+    if not HISTORY_FILE.exists():
+        return set()
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return _normalize_history_entries(raw)
+    except Exception:
+        return set()
+
+
+def save_history(new_history_keys):
+    """保存推送历史，保留最近 4000 条"""
     history = load_history()
-    updated = list(history.union(new_urls))[-1000:]
+    incoming = {str(x).strip() for x in (new_history_keys or set()) if str(x).strip()}
+    updated = sorted(history.union(incoming))
+    if len(updated) > 4000:
+        updated = updated[-4000:]
     try:
         PAGES_DIR.mkdir(parents=True, exist_ok=True)
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -1044,6 +1241,31 @@ def _maybe_throttle_request(url):
         return
 
 
+def _is_proxy_connection_error(err):
+    s = str(err or "").lower()
+    hints = [
+        "proxyerror",
+        "unable to connect to proxy",
+        "cannot connect to proxy",
+        "failed to establish a new connection",
+        "127.0.0.1', port=9",
+        "127.0.0.1:9",
+        "基础连接已经关闭",
+    ]
+    return any(h in s for h in hints)
+
+
+def _detect_bad_proxy_env():
+    bad = []
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        v = str(os.environ.get(k, "") or "").strip().lower()
+        if not v:
+            continue
+        if "127.0.0.1:9" in v or "localhost:9" in v:
+            bad.append((k, os.environ.get(k, "")))
+    return bad
+
+
 def safe_request(url, timeout=15, headers=None, trust_env=True, allow_redirects=True):
     default_headers = {
         "User-Agent": (
@@ -1072,7 +1294,8 @@ def safe_request(url, timeout=15, headers=None, trust_env=True, allow_redirects=
             resp.raise_for_status()
             return resp
         except Exception as e:
-            if "mp.weixin.qq.com/" in str(url) and trust_env:
+            # 若系统代理异常（如 127.0.0.1:9），自动回退直连，避免全量抓取归零
+            if trust_env and ("mp.weixin.qq.com/" in str(url) or _is_proxy_connection_error(e)):
                 try:
                     _maybe_throttle_request(url)
                     with requests.Session() as session:
@@ -1570,7 +1793,7 @@ def fetch_ai_frontier():
 def fetch_wechat_articles():
     source = WECHAT_SOURCE_NAME
     items = []
-    stats = {"raw": 0, "date": 0, "keyword": 0, "google": 0, "rsshub": 0, "sogou": 0, "bing": 0}
+    stats = {"raw": 0, "date": 0, "keyword": 0, "werss": 0, "google": 0, "rsshub": 0, "sogou": 0, "bing": 0, "priority": 0}
     print("      [B.5] 微信公众号文章抓取中...")
 
     priority_accounts = [x for x in WECHAT_OFFICIAL_ACCOUNTS if x in WECHAT_PRIORITY_ACCOUNTS]
@@ -1589,13 +1812,32 @@ def fetch_wechat_articles():
         "RAG 智能体 案例",
         "开源 AI 工具 使用指南",
         "语音 识别 合成 教程",
+        "AIGC 应用 案例",
+        "AI 编程 agent 工具",
+        "大模型 RAG 智能体 工作流",
+        "多模态 视频生成 图像生成",
+        "AI 开源 项目 GitHub",
+        "AI 最新 模型 发布",
+        "人工智能 创业 产品",
+        "机器学习 深度学习 论文",
+        "AI coding Claude Code Codex",
     ]
-    for account in priority_accounts[:6]:
+    for account in priority_accounts[:10]:
         wechat_queries.insert(0, f"{account} AI")
         wechat_queries.insert(1, f"{account} 音频 AI")
         wechat_queries.insert(2, f"{account} 教程")
 
-    # 1) 搜狗微信搜索主抓
+    # 1) 本地 WeRSS / We-MP-RSS 主抓；公网搜索只作为兜底
+    if WECHAT_ENABLE_WERSS:
+        werss_items = _fetch_werss_wechat_articles(source_name=source, max_items=WERSS_FETCH_LIMIT)
+        items.extend(werss_items)
+        stats["werss"] = len(werss_items)
+        if werss_items:
+            print(f"      [B.5] WeRSS 本地抓取命中: {len(werss_items)} 条")
+        else:
+            print("  [WARN] WeRSS 本地抓取为空：请确认 http://127.0.0.1:8001 已启动，或设置 WERSS_BASES/WERSS_USERNAME/WERSS_PASSWORD")
+
+    # 2) 搜狗微信搜索兜底
     sogou_queries = []
     for account in priority_accounts[:6]:
         sogou_queries.extend([
@@ -1609,27 +1851,42 @@ def fetch_wechat_articles():
         "公众号 AI 播客 工作流",
         "公众号 AI agent 实战",
         "公众号 大模型 应用 实战",
+        "公众号 AIGC 应用 案例",
+        "公众号 AI 编程 agent 工具",
+        "公众号 大模型 RAG 智能体 工作流",
+        "公众号 多模态 视频生成 图像生成",
+        "公众号 AI 开源 项目 GitHub",
+        "微信公众号 AI 最新 模型 发布",
+        "微信公众号 人工智能 创业 产品",
+        "微信公众号 机器学习 深度学习 论文",
+        "微信公众号 AI coding Claude Code Codex",
     ])
     if WECHAT_ENABLE_SOGOU:
         sogou_items = _fetch_sogou_wechat_search(
             source_name=source,
             queries=sogou_queries,
             max_items=18,
+            timeout=LISTING_FETCH_TIMEOUT,
         )
         items.extend(sogou_items)
         stats["sogou"] = len(sogou_items)
+        if not sogou_items:
+            print("  [WARN] 微信公众号搜狗结果为空（可能被反爬/网络限制）")
 
-    # 2) Bing 站内搜索兜底
+    # 3) Bing 站内搜索兜底
     if WECHAT_ENABLE_BING:
         bing_items = _fetch_bing_wechat_search(
             source_name=source,
             queries=sogou_queries,
             max_items=18,
+            timeout=LISTING_FETCH_TIMEOUT,
         )
         items.extend(bing_items)
         stats["bing"] = len(bing_items)
+        if not bing_items:
+            print("  [WARN] 微信公众号Bing结果为空（可能区域网络限制）")
 
-    # 3) Google News 仅保留为可选兜底
+    # 4) Google News 仅保留为可选兜底
     if WECHAT_ENABLE_GOOGLE_NEWS:
         google_items = _fetch_google_news_site(
             "mp.weixin.qq.com",
@@ -1639,8 +1896,10 @@ def fetch_wechat_articles():
         )
         items.extend(google_items)
         stats["google"] = len(google_items)
+        if not google_items:
+            print("  [WARN] 微信公众号Google News结果为空")
 
-    # 4) RSSHub 默认关闭，仅在手动开启时尝试
+    # 5) RSSHub 默认关闭，仅在手动开启时尝试
     if WECHAT_ENABLE_RSSHUB:
         if priority_accounts:
             rsshub_priority_items = _fetch_rsshub_wechat_accounts(
@@ -1658,6 +1917,38 @@ def fetch_wechat_articles():
             )
             items.extend(rsshub_other_items)
             stats["rsshub"] += len(rsshub_other_items)
+
+    # 6) 快速模式下抓空时，自动做一轮慢速重试，减少“全0”概率
+    if not items and FAST_FETCH_MODE:
+        retry_timeout = max(12, LISTING_FETCH_TIMEOUT + 6)
+        print(f"  [INFO] 微信公众号进入慢速重试（timeout={retry_timeout}s）...")
+        if WECHAT_ENABLE_SOGOU:
+            retry_sogou = _fetch_sogou_wechat_search(
+                source_name=source,
+                queries=sogou_queries,
+                max_items=24,
+                timeout=retry_timeout,
+            )
+            items.extend(retry_sogou)
+            stats["sogou"] += len(retry_sogou)
+        if WECHAT_ENABLE_BING:
+            retry_bing = _fetch_bing_wechat_search(
+                source_name=source,
+                queries=sogou_queries,
+                max_items=24,
+                timeout=retry_timeout,
+            )
+            items.extend(retry_bing)
+            stats["bing"] += len(retry_bing)
+        if WECHAT_ENABLE_GOOGLE_NEWS:
+            retry_google = _fetch_google_news_site(
+                "mp.weixin.qq.com",
+                source_name=source,
+                extra_queries=wechat_queries[: max(20, VIDEO_QUERY_LIMIT + 10)],
+                max_entries=24,
+            )
+            items.extend(retry_google)
+            stats["google"] += len(retry_google)
 
     dedup = []
     seen = set()
@@ -1685,27 +1976,32 @@ def fetch_wechat_articles():
             stats["date"] += 1
             continue
 
-        if not practical_keyword_gate(it):
-            stats["keyword"] += 1
-            continue
-
         account_hint = get_wechat_account_hint(it)
         if account_hint:
             it["account_name"] = account_hint
             it["is_priority_wechat"] = True
+            stats["priority"] += 1
         elif it.get("account_name"):
             it["is_priority_wechat"] = it["account_name"] in WECHAT_PRIORITY_ACCOUNTS
+            if it["is_priority_wechat"]:
+                stats["priority"] += 1
         else:
             it["is_priority_wechat"] = False
+
+        if not wechat_keyword_gate(it):
+            stats["keyword"] += 1
+            continue
 
         seen.add(url)
         dedup.append(_mark_social_item(it, platform="WeChat", is_video=False))
 
     print(
         f"      [B.5] 微信公众号文章完成: {len(dedup)} 条 "
-        f"(raw={stats['raw']}, 搜狗={stats['sogou']}, Bing={stats['bing']}, Google={stats['google']}, RSSHub={stats['rsshub']}, "
-        f"日期过滤={stats['date']}, 关键词过滤={stats['keyword']})"
+        f"(raw={stats['raw']}, WeRSS={stats['werss']}, 搜狗={stats['sogou']}, Bing={stats['bing']}, Google={stats['google']}, RSSHub={stats['rsshub']}, "
+        f"优先号={stats['priority']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})"
     )
+    if stats["raw"] == 0:
+        print("  [WARN] 微信公众号候选为 0：请优先检查本地 WeRSS 登录/订阅状态；公网搜狗/Bing/Google/RSSHub 可能也有限制。")
     tracker.record(source, dedup)
     return dedup
 
@@ -2120,15 +2416,511 @@ def _build_wechat_item(source_name, article_url, title, query="", summary="", ac
     }
 
 
-def _fetch_sogou_wechat_search(source_name, queries, max_items=20):
+def _extract_werss_token(data):
+    if not isinstance(data, dict):
+        return ""
+    for key in ("access_token", "token", "accessToken"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    for key in ("data", "result"):
+        token = _extract_werss_token(data.get(key))
+        if token:
+            return token
+    return ""
+
+
+def _looks_mojibake(text):
+    s = str(text or "")
+    return any(x in s for x in ("Ã", "Â", "ä", "å", "æ", "ç", "è", "é", "�"))
+
+
+def _fix_mojibake(text):
+    s = str(text or "")
+    if not s or not _looks_mojibake(s):
+        return s
+    try:
+        return s.encode("latin1").decode("utf-8")
+    except Exception:
+        return s
+
+
+def _deep_fix_mojibake(obj):
+    if isinstance(obj, str):
+        return _fix_mojibake(obj)
+    if isinstance(obj, list):
+        return [_deep_fix_mojibake(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _deep_fix_mojibake(v) for k, v in obj.items()}
+    return obj
+
+
+def _werss_request_json(base, path, token="", method="GET", timeout=None, json_body=None, data=None):
+    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "AI-m-OK/WeRSS",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        with requests.Session() as session:
+            session.trust_env = False
+            if method.upper() == "POST":
+                resp = session.post(
+                    url,
+                    timeout=timeout or LISTING_FETCH_TIMEOUT,
+                    headers=headers,
+                    json=json_body,
+                    data=data,
+                )
+            else:
+                resp = session.get(url, timeout=timeout or LISTING_FETCH_TIMEOUT, headers=headers)
+        if resp.status_code in {401, 403, 404}:
+            return None
+        resp.raise_for_status()
+        return _deep_fix_mojibake(resp.json())
+    except Exception:
+        return None
+
+
+def _werss_login(base):
+    if WERSS_TOKEN:
+        return WERSS_TOKEN
+    if not WERSS_USERNAME or not WERSS_PASSWORD:
+        return ""
+    login_attempts = [
+        ("/api/v1/wx/auth/token", "form"),
+        ("/api/v1/wx/auth/login", "json"),
+        ("/api/v1/wx/auth/login", "form"),
+    ]
+    for path, payload_kind in login_attempts:
+        url = f"{base.rstrip('/')}{path}"
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                kwargs = {
+                    "headers": {"Accept": "application/json, text/plain, */*"},
+                    "timeout": LISTING_FETCH_TIMEOUT,
+                }
+                payload = {"username": WERSS_USERNAME, "password": WERSS_PASSWORD}
+                if payload_kind == "json":
+                    kwargs["json"] = payload
+                else:
+                    kwargs["data"] = payload
+                resp = session.post(url, **kwargs)
+            if resp.status_code >= 400:
+                continue
+            token = _extract_werss_token(resp.json())
+            if token:
+                return token
+        except Exception:
+            continue
+    return ""
+
+
+def _iter_werss_records(data, depth=0):
+    if depth > 6 or data is None:
+        return
+    if isinstance(data, list):
+        for row in data:
+            yield from _iter_werss_records(row, depth + 1)
+        return
+    if not isinstance(data, dict):
+        return
+
+    keys = {str(k).lower() for k in data.keys()}
+    article_keys = {
+        "title", "article_title", "articleurl", "article_url", "url", "link",
+        "content_url", "source_url", "mp_name", "account_name", "digest",
+    }
+    if keys & article_keys:
+        yield data
+    for key in ("data", "result", "records", "items", "list", "articles", "rows"):
+        if key in data:
+            yield from _iter_werss_records(data.get(key), depth + 1)
+
+
+def _pick_werss_value(row, keys):
+    for key in keys:
+        val = row.get(key)
+        if val not in (None, ""):
+            return str(val).strip()
+    return ""
+
+
+def _normalize_werss_date(raw):
+    if raw in (None, ""):
+        return ""
+    s = str(raw).strip()
+    if re.match(r"^\d{10}(\.\d+)?$", s):
+        try:
+            return datetime.fromtimestamp(float(s), tz=timezone.utc).astimezone(BEIJING_TZ).isoformat()
+        except Exception:
+            return ""
+    if re.match(r"^\d{13}$", s):
+        try:
+            return datetime.fromtimestamp(int(s) / 1000, tz=timezone.utc).astimezone(BEIJING_TZ).isoformat()
+        except Exception:
+            return ""
+    dt = parse_date_to_beijing(s)
+    return dt.isoformat() if dt else s
+
+
+def _build_werss_item(source_name, row, query="WeRSS"):
+    article_url = _pick_werss_value(row, (
+        "article_url", "articleUrl", "articleurl", "content_url", "contentUrl",
+        "source_url", "sourceUrl", "url", "link",
+    ))
+    if article_url and article_url.startswith("/"):
+        article_url = urljoin("https://mp.weixin.qq.com/", article_url)
+    if "mp.weixin.qq.com" not in article_url:
+        return None
+
+    title = _pick_werss_value(row, ("title", "article_title", "articleTitle", "name"))
+    if not title:
+        title = query + " 微信文章"
+    summary = _pick_werss_value(row, ("digest", "summary", "description", "desc", "content"))
+    account_name = _pick_werss_value(row, ("mp_name", "mpName", "account_name", "accountName", "author", "source"))
+    date_val = _normalize_werss_date(_pick_werss_value(row, (
+        "publish_time", "publishTime", "published_at", "publishedAt", "created_at",
+        "createdAt", "update_time", "updateTime", "datetime", "date",
+    )))
+    item = _build_wechat_item(
+        source_name=source_name,
+        article_url=article_url,
+        title=title,
+        query=query,
+        summary=_truncate_text(unescape(re.sub(r"<[^>]+>", " ", summary)), 260) or f"via {source_name} WeRSS",
+        account_name=account_name,
+    )
+    if date_val:
+        item["date"] = date_val
+        item["date_inferred"] = False
+    return item
+
+
+def _fetch_werss_api_articles(base, source_name, max_items=40):
+    token = _werss_login(base)
+    paths = [
+        "/api/v1/wx/articles",
+        "/api/v1/wx/articles?page=1&page_size=50",
+        "/api/v1/wx/articles?limit=50",
+    ]
     items = []
     seen = set()
+    for method in ("GET", "POST"):
+        for path in paths:
+            data = _werss_request_json(base, path, token=token, method=method)
+            if data is None:
+                continue
+            for row in _iter_werss_records(data):
+                item = _build_werss_item(source_name, row, query="WeRSS API")
+                if not item:
+                    continue
+                url = item.get("url", "").rstrip("/")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                items.append(item)
+                if len(items) >= max_items:
+                    return items
+            if items:
+                return items
+    return items
+
+
+def _extract_werss_feed_urls(data, base):
+    urls = []
+    for row in _iter_werss_records(data):
+        for key in ("rss", "rss_url", "rssUrl", "feed", "feed_url", "feedUrl", "url", "link"):
+            val = str(row.get(key, "") or "").strip()
+            if not val:
+                continue
+            if val.startswith("/"):
+                val = urljoin(base.rstrip("/") + "/", val.lstrip("/"))
+            if val.startswith("http") and val not in urls:
+                urls.append(val)
+    return urls
+
+
+def _fetch_werss_feed_articles(base, source_name, max_items=40):
+    urls = [
+        f"{base.rstrip()}/feeds/all.atom",
+        f"{base.rstrip()}/feeds/all.rss",
+        f"{base.rstrip()}/feeds/all.json",
+        f"{base.rstrip()}/rss",
+        f"{base.rstrip()}/feed",
+    ]
+    token = _werss_login(base)
+    for path in ("/rss", "/api/v1/wx/mps"):
+        data = _werss_request_json(base, path, token=token)
+        if data is not None:
+            urls.extend(_extract_werss_feed_urls(data, base))
+
+    items = []
+    seen = set()
+    for feed_url in urls:
+        part = parse_rss_feed(feed_url, source_name=source_name, max_entries=max_items, ai_filter=False)
+        for it in part:
+            url = it.get("url", "").rstrip("/")
+            if "mp.weixin.qq.com" not in url or url in seen:
+                continue
+            seen.add(url)
+            it["search_query"] = "WeRSS Feed"
+            it["account_name"] = get_wechat_account_hint(it) or it.get("account_name", "")
+            items.append(it)
+            if len(items) >= max_items:
+                return items
+    return items
+
+
+def _werss_response_data(resp):
+    if isinstance(resp, dict):
+        data = resp.get("data")
+        return data if data is not None else resp
+    return resp
+
+
+def _werss_existing_subscriptions(base, token):
+    existing = {}
+    data = _werss_request_json(base, "/api/v1/wx/mps?limit=100&offset=0", token=token)
+    data = _werss_response_data(data)
+    rows = []
+    if isinstance(data, dict):
+        rows = data.get("list") or data.get("items") or data.get("records") or []
+    elif isinstance(data, list):
+        rows = data
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("mp_name") or row.get("nickname") or "").strip()
+        fid = str(row.get("faker_id") or row.get("mp_id") or row.get("id") or "").strip()
+        if name:
+            existing[name.lower()] = row
+        if fid:
+            existing[fid] = row
+    return existing
+
+
+def _best_werss_search_match(account, rows):
+    if not rows:
+        return None
+    account_l = account.lower()
+    for row in rows:
+        nickname = str(row.get("nickname") or row.get("mp_name") or "").strip()
+        alias = str(row.get("alias") or row.get("username") or "").strip()
+        if nickname == account or nickname.lower() == account_l or alias.lower() == account_l:
+            return row
+    for row in rows:
+        nickname = str(row.get("nickname") or row.get("mp_name") or "").strip()
+        signature = str(row.get("signature") or row.get("mp_intro") or "").strip()
+        if account_l in f"{nickname} {signature}".lower():
+            return row
+    return rows[0]
+
+
+def _werss_feed_id_from_fakeid(fakeid):
+    raw = str(fakeid or "").strip()
+    if not raw:
+        return ""
+    try:
+        decoded = base64.b64decode(raw).decode("utf-8")
+        return f"MP_WXS_{decoded}"
+    except Exception:
+        return ""
+
+
+def _werss_subscribe_account(base, token, account):
+    search_path = f"/api/v1/wx/mps/search/{quote_plus(account)}?limit=5&offset=0"
+    data = _werss_request_json(base, search_path, token=token, timeout=max(12, LISTING_FETCH_TIMEOUT))
+    data = _werss_response_data(data)
+    rows = []
+    if isinstance(data, dict):
+        rows = data.get("list") or []
+    elif isinstance(data, list):
+        rows = data
+    match = _best_werss_search_match(account, rows)
+    if not match:
+        return False, "not_found"
+    fakeid = str(match.get("fakeid") or match.get("mp_id") or match.get("faker_id") or "").strip()
+    nickname = str(match.get("nickname") or match.get("mp_name") or account).strip()
+    if not fakeid:
+        return False, "missing_fakeid"
+    payload = {
+        "mp_name": nickname,
+        "mp_id": fakeid,
+        "avatar": str(match.get("round_head_img") or match.get("avatar") or match.get("mp_cover") or "").strip(),
+        "mp_intro": str(match.get("signature") or match.get("mp_intro") or "").strip()[:250],
+    }
+    resp = _werss_request_json(
+        base,
+        "/api/v1/wx/mps",
+        token=token,
+        method="POST",
+        timeout=max(12, LISTING_FETCH_TIMEOUT),
+        json_body=payload,
+    )
+    if resp is None:
+        return False, "add_failed"
+    return True, nickname
+
+
+def _ensure_werss_ai_subscriptions(base, token):
+    if not WERSS_AUTO_SUBSCRIBE:
+        return {"added": 0, "existing": 0, "failed": 0, "checked": 0}
+    existing = _werss_existing_subscriptions(base, token)
+    stats = {"added": 0, "existing": 0, "failed": 0, "checked": 0}
+    for account in WERSS_AUTOSUBSCRIBE_ACCOUNTS[:max(0, WERSS_AUTOSUBSCRIBE_LIMIT)]:
+        stats["checked"] += 1
+        if account.lower() in existing:
+            stats["existing"] += 1
+            continue
+        search_path = f"/api/v1/wx/mps/search/{quote_plus(account)}?limit=5&offset=0"
+        data = _werss_request_json(base, search_path, token=token, timeout=max(12, LISTING_FETCH_TIMEOUT))
+        data = _werss_response_data(data)
+        rows = data.get("list") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        match = _best_werss_search_match(account, rows)
+        if match:
+            feed_id = _werss_feed_id_from_fakeid(match.get("fakeid"))
+            if feed_id and feed_id in existing:
+                stats["existing"] += 1
+                existing[account.lower()] = existing[feed_id]
+                continue
+        ok, info = _werss_subscribe_account(base, token, account)
+        if ok:
+            stats["added"] += 1
+            existing[account.lower()] = {"mp_name": info}
+            existing[str(info).lower()] = {"mp_name": info}
+        else:
+            stats["failed"] += 1
+    return stats
+
+
+def _priority_werss_rows(rows):
+    priority_order = {name: idx for idx, name in enumerate(WECHAT_OFFICIAL_ACCOUNTS)}
+
+    def _sort_key(row):
+        name = str(row.get("mp_name") or row.get("nickname") or "").strip()
+        article_count = int(row.get("article_count") or 0)
+        max_publish = row.get("max_publish_time") or 0
+        is_priority = name in WECHAT_PRIORITY_ACCOUNTS
+        return (
+            0 if is_priority else 1,
+            priority_order.get(name, 999),
+            0 if article_count == 0 else 1,
+            int(max_publish or 0),
+        )
+
+    return sorted(rows, key=_sort_key)
+
+
+def _werss_row_recently_active(row, recent_days=None):
+    recent_days = max(0, recent_days if recent_days is not None else WERSS_REFRESH_RECENT_DAYS)
+    article_count = int(row.get("article_count") or 0)
+    if article_count <= 0:
+        return False
+    max_publish = row.get("max_publish_time")
+    if max_publish in (None, "", 0, "0"):
+        return False
+    try:
+        dt = parse_date_to_beijing(datetime.fromtimestamp(int(max_publish), tz=timezone.utc))
+        if not dt:
+            return False
+        delta = datetime.now(BEIJING_TZ) - dt
+        return timedelta(0) <= delta <= timedelta(days=recent_days)
+    except Exception:
+        return False
+
+
+def _refresh_werss_subscriptions(base, token):
+    if not WERSS_UPDATE_BEFORE_FETCH:
+        return {"updated": 0, "failed": 0, "skipped": 0}
+    data = _werss_request_json(base, "/api/v1/wx/mps?limit=100&offset=0", token=token)
+    data = _werss_response_data(data)
+    rows = []
+    if isinstance(data, dict):
+        rows = data.get("list") or []
+    elif isinstance(data, list):
+        rows = data
+    recent_rows = [row for row in rows if _werss_row_recently_active(row)]
+    target_rows = _priority_werss_rows(recent_rows)[:max(0, WERSS_UPDATE_LIMIT)]
+    stats = {
+        "updated": 0,
+        "failed": 0,
+        "skipped": max(0, len(rows) - len(target_rows)),
+        "eligible": len(recent_rows),
+    }
+    for row in target_rows:
+        mp_id = str(row.get("id") or row.get("mp_id") or "").strip()
+        if not mp_id:
+            stats["failed"] += 1
+            continue
+        resp = _werss_request_json(
+            base,
+            f"/api/v1/wx/mps/update/{quote_plus(mp_id)}?start_page=0&end_page=1",
+            token=token,
+            timeout=35,
+        )
+        if resp is None:
+            stats["failed"] += 1
+            continue
+        text = json.dumps(resp, ensure_ascii=False)
+        if "登录已失效" in text or "Invalid Session" in text:
+            print("  [WARN] WeRSS 微信公众号授权已失效：需要在 WeRSS 页面重新扫码微信账号")
+            stats["failed"] += 1
+            continue
+        stats["updated"] += 1
+    return stats
+
+
+def _fetch_werss_wechat_articles(source_name, max_items=None):
+    max_items = max_items or WERSS_FETCH_LIMIT
+    items = []
+    seen = set()
+    for base in WERSS_BASES:
+        token = _werss_login(base)
+        if token:
+            sub_stats = _ensure_werss_ai_subscriptions(base, token)
+            if sub_stats["checked"]:
+                print(
+                    f"      [B.5] WeRSS 自动订阅检查: 已有 {sub_stats['existing']} 个, "
+                    f"新增 {sub_stats['added']} 个, 失败 {sub_stats['failed']} 个"
+                )
+            update_stats = _refresh_werss_subscriptions(base, token)
+            if update_stats.get("eligible") or update_stats["updated"] or update_stats["failed"]:
+                print(
+                    f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
+                    f"更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
+                )
+        elif WERSS_AUTO_SUBSCRIBE:
+            print("  [WARN] WeRSS 自动订阅跳过：后台登录失败，请检查 WERSS_USERNAME/WERSS_PASSWORD")
+        api_items = _fetch_werss_api_articles(base, source_name=source_name, max_items=max_items)
+        feed_items = _fetch_werss_feed_articles(base, source_name=source_name, max_items=max_items)
+        for it in api_items + feed_items:
+            url = it.get("url", "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(it)
+            if len(items) >= max_items:
+                return items
+        if items:
+            return items
+    return items
+
+
+def _fetch_sogou_wechat_search(source_name, queries, max_items=20, timeout=None):
+    items = []
+    seen = set()
+    err_count = 0
+    req_timeout = timeout or LISTING_FETCH_TIMEOUT
     for q in queries[:WECHAT_SEARCH_QUERY_LIMIT]:
         try:
             url = f"https://weixin.sogou.com/weixin?type=2&query={quote_plus(q)}"
             resp = safe_request(
                 url,
-                timeout=LISTING_FETCH_TIMEOUT,
+                timeout=req_timeout,
                 headers={
                     "Referer": "https://weixin.sogou.com/",
                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -2204,20 +2996,25 @@ def _fetch_sogou_wechat_search(source_name, queries, max_items=20):
                 )
                 if len(items) >= max_items:
                     return items
-        except Exception:
+        except Exception as e:
+            err_count += 1
+            if err_count <= 2:
+                print(f"  [WARN] 微信公众号搜狗抓取失败: {q[:24]} -> {e}")
             continue
     return items
 
 
-def _fetch_bing_wechat_search(source_name, queries, max_items=20):
+def _fetch_bing_wechat_search(source_name, queries, max_items=20, timeout=None):
     items = []
     seen = set()
+    err_count = 0
+    req_timeout = timeout or LISTING_FETCH_TIMEOUT
     for q in queries[:WECHAT_SEARCH_QUERY_LIMIT]:
         try:
             search_url = f"https://www.bing.com/search?q={quote_plus('site:mp.weixin.qq.com ' + q)}"
             resp = safe_request(
                 search_url,
-                timeout=LISTING_FETCH_TIMEOUT,
+                timeout=req_timeout,
                 headers={"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
             )
             if not resp:
@@ -2274,7 +3071,10 @@ def _fetch_bing_wechat_search(source_name, queries, max_items=20):
                 )
                 if len(items) >= max_items:
                     return items
-        except Exception:
+        except Exception as e:
+            err_count += 1
+            if err_count <= 2:
+                print(f"  [WARN] 微信公众号Bing抓取失败: {q[:24]} -> {e}")
             continue
     return items
 
@@ -2732,6 +3532,54 @@ def practical_keyword_gate(item):
     return True
 
 
+def is_audio_special_item(item):
+    text = build_item_filter_text(item, include_query=True)
+    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI"}:
+        return True
+    return bool(
+        re.search(
+            r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def wechat_keyword_gate(item):
+    """
+    公众号单独放宽门槛：
+    - 保留 AI 相关硬约束
+    - 对优先账号、音频相关、新模型发布适度放宽“教程词”要求
+    """
+    core_text = build_item_filter_text(item, include_query=False)
+    support_text = build_item_filter_text(item, include_query=True)
+    account_hint = get_wechat_account_hint(item)
+    account_name = str(item.get("account_name", "")).strip()
+    is_priority = bool(item.get("is_priority_wechat")) or bool(account_hint) or (account_name in WECHAT_PRIORITY_ACCOUNTS)
+
+    if EXCLUDE_PATTERN.search(support_text):
+        return False
+    if is_non_actionable_page(item):
+        return False
+    if is_non_practical_news(item):
+        return False
+    if not AI_CORE_PATTERN.search(support_text):
+        return False
+
+    practice_hit = bool(PRACTICE_REQUIRED_PATTERN.search(support_text))
+    model_or_innovation_hit = bool(MODEL_SIGNAL.search(core_text) or INNOVATION_SIGNAL.search(core_text))
+    application_hit = bool(APPLICATION_SIGNAL.search(support_text) or ORDINARY_HINT_PATTERN.search(support_text))
+    audio_hit = is_audio_special_item(item)
+
+    if practice_hit:
+        return True
+    if is_priority and (application_hit or model_or_innovation_hit or audio_hit):
+        return True
+    if audio_hit and (application_hit or model_or_innovation_hit):
+        return True
+    return False
+
+
 def resolve_google_news_redirect(url):
     """
     尝试从 Google News RSS 中转链接解析真实外链。
@@ -3042,7 +3890,7 @@ def _extract_youtube_published_date(url):
             },
         )
         if not resp:
-            return ""
+            return "", "low"
         html = resp.text
 
         patterns = [
@@ -3865,7 +4713,7 @@ def fetch_youtube():
         elif it.get("date"):
             effective_date = it.get("date", "")
             effective_conf = "medium" if not it.get("date_inferred") else "low"
-        elif it.get("_search_rel_date"):
+        elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
             effective_date = it.get("_search_rel_date", "")
             effective_conf = "low"
 
@@ -3873,10 +4721,14 @@ def fetch_youtube():
         if not effective_date:
             stats["date"] += 1
             continue
+        if YOUTUBE_REQUIRE_CONFIDENT_DATE and effective_conf == "low":
+            stats["date"] += 1
+            continue
         it["date"] = effective_date
         it["date_inferred"] = effective_conf != "high"
         it["_date_confidence"] = effective_conf
         if not is_within_days(effective_date, YOUTUBE_MAX_AGE_DAYS):
+            stats["date"] += 1
             continue
         if not practical_video_gate(it):
             stats["keyword"] += 1
@@ -4020,10 +4872,14 @@ def fetch_video_tutorial_sources():
                 effective_date = page_date
                 it["date"] = page_date
                 it["date_inferred"] = conf != "high"
-            elif it.get("_search_rel_date"):
+            elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
                 effective_date = it.get("_search_rel_date", "")
                 it["date"] = effective_date
                 it["date_inferred"] = True
+                conf = "low"
+            if YOUTUBE_REQUIRE_CONFIDENT_DATE and (not page_date) and conf == "low":
+                stats["date"] += 1
+                continue
             if not effective_date or not is_within_days(effective_date, YOUTUBE_MAX_AGE_DAYS):
                 stats["date"] += 1
                 continue
@@ -4390,9 +5246,13 @@ def pool_bucket(item):
     frontier_hit = frontier_innovation_gate(item)
     practice_required_hit = bool(PRACTICE_REQUIRED_PATTERN.search(build_item_filter_text(item, include_query=True)))
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
+    is_priority_wechat = bool(item.get("is_priority_wechat"))
 
     if date_ok and reliable_source and (practical_hit or frontier_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2)):
         return "A"
+    if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
+        if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
+            return "B"
     if date_ok and reliable_source and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if audio_score >= 2 or ordinary_hit or practical_score >= max(1, PRACTICAL_MIN_SCORE - 1):
             return "B"
@@ -4416,6 +5276,7 @@ def is_practical_candidate(item):
     ai_core_hit = bool(AI_CORE_PATTERN.search(text))
     practice_required_hit = bool(PRACTICE_REQUIRED_PATTERN.search(support_text))
     excluded_hit = bool(EXCLUDE_PATTERN.search(support_text))
+    is_priority_wechat = item.get("source") == WECHAT_SOURCE_NAME and bool(item.get("is_priority_wechat"))
 
     if excluded_hit:
         return False
@@ -4425,6 +5286,8 @@ def is_practical_candidate(item):
         return False
     if not ai_core_hit:
         return False
+    if is_priority_wechat and (practice_required_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
+        return True
     if frontier_innovation_gate(item):
         return True
     if practice_required_hit:
@@ -4438,7 +5301,7 @@ def is_practical_candidate(item):
 
 def allowed_item_age_hours(item):
     source = item.get("source", "")
-    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "Video Tutorials"}:
+    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
         return 24 * 7
     if item.get("is_video"):
         platform = str(item.get("platform", "")).lower()
@@ -4581,7 +5444,7 @@ def quality_filter(items):
             dynamic_threshold = PRACTICAL_MIN_SCORE
             if frontier_innovation_gate(item):
                 dynamic_threshold = max(1, PRACTICAL_MIN_SCORE - 1)
-            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials"}:
+            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials", WECHAT_SOURCE_NAME}:
                 dynamic_threshold = max(1, dynamic_threshold - 1)
             if item_pool == "B":
                 dynamic_threshold = max(1, dynamic_threshold - 1)
@@ -4675,7 +5538,7 @@ def deduplicate_and_rank(all_items):
     ]
 
     # ── 加载历史记录，进行隔日去重 ──
-    history_urls = load_history()
+    history_keys = load_history()
     seen_urls = set()
     seen_titles = []
     seen_fingerprints = {}
@@ -4687,13 +5550,23 @@ def deduplicate_and_rank(all_items):
     )
 
     for item in items:
-        url = item["url"].rstrip("/")
+        raw_url = item.get("url", "")
+        url = raw_url.rstrip("/")
+        canonical_url = canonicalize_url_for_history(raw_url)
         title = item.get("title", "")
         fp = extract_content_fingerprint(item)
+        title_key = normalize_title_key(item.get("title_zh") or title)
 
         if not title:
             continue
-        if url in seen_urls or url in history_urls:
+        history_hit = False
+        if canonical_url and f"url::{canonical_url}" in history_keys:
+            history_hit = True
+        if title_key and f"title::{title_key}" in history_keys:
+            history_hit = True
+        if fp and f"fp::{fp}" in history_keys:
+            history_hit = True
+        if canonical_url in seen_urls or history_hit:
             continue
         if is_duplicate_title(title, seen_titles):
             continue
@@ -4715,7 +5588,8 @@ def deduplicate_and_rank(all_items):
             else:
                 seen_fingerprints[fp] = item
 
-        seen_urls.add(url)
+        if canonical_url:
+            seen_urls.add(canonical_url)
         seen_titles.append(title)
         deduped.append(item)
 
@@ -5396,11 +6270,29 @@ def build_review_feedback_records(all_review_items, selected_items):
 
 def build_feishu_card(items, date_str):
     feishu_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)[:FEISHU_TOP_N]
+    audio_candidates = sorted(
+        [it for it in items if is_audio_special_item(it)],
+        key=lambda x: x.get("heat_score", 0),
+        reverse=True,
+    )
 
     total_count = len(items)
     feishu_count = len(feishu_items)
 
     source_count = len(set(it["source"] for it in feishu_items))
+    used_urls = {str(it.get("url", "")).rstrip("/") for it in feishu_items}
+    audio_items = []
+    if FEISHU_AUDIO_TOP_N > 0:
+        for it in audio_candidates:
+            u = str(it.get("url", "")).rstrip("/")
+            if not u or u in used_urls:
+                continue
+            audio_items.append(it)
+            used_urls.add(u)
+            if len(audio_items) >= FEISHU_AUDIO_TOP_N:
+                break
+        if not audio_items:
+            audio_items = [it for it in feishu_items if is_audio_special_item(it)][: min(3, FEISHU_AUDIO_TOP_N)]
 
     intl_items = [it for it in feishu_items if it.get("source_type") != "domestic"]
     domestic_items = [it for it in feishu_items if it.get("source_type") == "domestic"]
@@ -5463,6 +6355,20 @@ def build_feishu_card(items, date_str):
         elements.append({"tag": "hr"})
         _append_news_items(domestic_items)
 
+    if audio_items:
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "markdown",
+            "content": "<font color='orange'>**🎧 AI音频专项**</font>",
+            "text_size": "heading",
+        })
+        elements.append({
+            "tag": "markdown",
+            "content": "<font color='grey'>聚焦音频/配音/播客/语音工作流与可复用实践</font>",
+        })
+        elements.append({"tag": "hr"})
+        _append_news_items(audio_items)
+
     elements.append({"tag": "hr"})
 
     if total_count > feishu_count:
@@ -5485,7 +6391,7 @@ def build_feishu_card(items, date_str):
         "tag": "note",
         "elements": [{
             "tag": "plain_text",
-            "content": f"由 AI'm OK 自动生成 | {date_str} | {source_count}源聚合 | 飞书精选Top{feishu_count}",
+            "content": f"由 AI'm OK 自动生成 | {date_str} | {source_count}源聚合 | 飞书精选Top{feishu_count} | 音频专项{len(audio_items)}",
         }],
     })
 
@@ -5567,6 +6473,81 @@ def publish_to_pages(html_content, date_str):
     except Exception as e:
         print(f"[WARN] GitHub Pages push failed: {e}")
 
+
+def backup_script_to_github(date_str):
+    """
+    备份脚本自身到代码仓库（可通过 AUTO_GITHUB_BACKUP 关闭）。
+    默认把当前脚本同步为仓库中的 AI-m-OK.py / AI-m-OK.optimized.py 后再提交推送。
+    """
+    if not AUTO_GITHUB_BACKUP:
+        return
+    try:
+        script_path = Path(__file__).resolve()
+    except Exception:
+        script_path = Path(sys.argv[0]).resolve() if sys.argv else Path.cwd() / "AI-m-OK.py"
+
+    repo_dir = script_path.parent
+    if not (repo_dir / ".git").exists():
+        print(f"[WARN] 脚本备份跳过：目录不是 git 仓库 -> {repo_dir}")
+        return
+
+    target_paths = []
+    for target in SCRIPT_BACKUP_TARGETS:
+        p = Path(target)
+        target_path = p if p.is_absolute() else (repo_dir / p)
+        target_paths.append(target_path)
+
+    staged_rel = []
+    for dst in target_paths:
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.resolve() != script_path:
+                shutil.copyfile(script_path, dst)
+            staged_rel.append(str(dst.resolve().relative_to(repo_dir.resolve())))
+        except Exception as copy_err:
+            print(f"[WARN] 脚本备份复制失败: {dst} -> {copy_err}")
+
+    if not staged_rel:
+        return
+
+    try:
+        subprocess.run(["git", "add", "--"] + staged_rel, cwd=str(repo_dir), check=True, capture_output=True)
+        diff_proc = subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "--"] + staged_rel,
+            cwd=str(repo_dir),
+            capture_output=True,
+        )
+        if diff_proc.returncode == 0:
+            print("      脚本备份: 无新增变更")
+            return
+
+        subprocess.run(
+            ["git", "commit", "-m", f"backup: AI-m-OK script {date_str}"],
+            cwd=str(repo_dir),
+            check=True,
+            capture_output=True,
+        )
+        try:
+            subprocess.run(
+                ["git", "pull", "--rebase", "--autostash", "origin", SCRIPT_BACKUP_BRANCH],
+                cwd=str(repo_dir),
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        except Exception as pull_err:
+            print(f"[WARN] 脚本备份 pull --rebase 失败: {pull_err}")
+        subprocess.run(
+            ["git", "push", "origin", SCRIPT_BACKUP_BRANCH],
+            cwd=str(repo_dir),
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        print(f"      脚本已自动备份到 GitHub ({SCRIPT_BACKUP_BRANCH}) ✅")
+    except Exception as e:
+        print(f"[WARN] 脚本自动备份失败: {e}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 主流程
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5578,6 +6559,10 @@ def main():
     print(f"  多源聚合 · 实用导向筛选 · 视频字幕抽取 · 反幻觉校验 · 72h时效 · 隔日去重")
     print(f"{'='*60}\n")
     print(f"🗂️  发布目录: {PAGES_DIR}")
+    bad_proxies = _detect_bad_proxy_env()
+    if bad_proxies:
+        show = ", ".join(f"{k}={v}" for k, v in bad_proxies[:3])
+        print(f"  [WARN] 检测到疑似无效代理配置: {show}（已自动尝试直连回退）")
 
     print("📡 [Phase A] 聚合源抓取...")
     tldr = fetch_tldr()
@@ -5675,6 +6660,7 @@ def main():
 
     print("\n🚀 [Phase H] Publishing...")
     publish_to_pages(html, today)
+    backup_script_to_github(today)
 
     card = build_feishu_card(final, today)
     feishu_ok = push_feishu(card)
@@ -5682,9 +6668,15 @@ def main():
 
     # ── 只有飞书真正推送成功后，才保存历史；审核阶段不算推送 ──
     if feishu_ok:
-        pushed_urls = {it["url"].rstrip("/") for it in final}
-        save_history(pushed_urls)
-        print(f"      已保存 {len(pushed_urls)} 条飞书推送记录到历史文件，防止后续重复推送。")
+        pushed_urls = {canonicalize_url_for_history(it.get("url", "")) for it in final if it.get("url")}
+        pushed_urls = {u for u in pushed_urls if u}
+        pushed_history_keys = set()
+        for it in final:
+            pushed_history_keys.update(history_keys_from_item(it))
+        save_history(pushed_history_keys)
+        print(
+            f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, 去重键 {len(pushed_history_keys)} 条，后续将避免重复推送。"
+        )
     else:
         print("      飞书推送未成功，本次不写入历史，避免审核过但未送达的内容被误去重。")
 
