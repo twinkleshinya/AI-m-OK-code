@@ -209,6 +209,13 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "PaperWeekly",
     "夕小瑶科技说",
 }
+WECHAT_AUDIO_FOCUS_ACCOUNTS = {
+    "风亭韵律",
+    "audiokinetic官方",
+    "电影声音网Filmsound.cn",
+    "AI音频时代",
+    "上和弦",
+}
 
 AUDIO_CREATOR_PAGES = [
     "https://elevenlabs.io/blog",
@@ -318,7 +325,7 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "8" if FAST_FETCH_MODE else "17"))
-WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "5"))
+WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
 
@@ -2804,12 +2811,14 @@ def _priority_werss_rows(rows):
         name = str(row.get("mp_name") or row.get("nickname") or "").strip()
         article_count = int(row.get("article_count") or 0)
         max_publish = row.get("max_publish_time") or 0
+        is_audio_focus = name in WECHAT_AUDIO_FOCUS_ACCOUNTS
         is_priority = name in WECHAT_PRIORITY_ACCOUNTS
         return (
+            0 if is_audio_focus else 1,
             0 if is_priority else 1,
+            -int(max_publish or 0),
             priority_order.get(name, 999),
-            0 if article_count == 0 else 1,
-            int(max_publish or 0),
+            -article_count,
         )
 
     return sorted(rows, key=_sort_key)
@@ -6332,10 +6341,11 @@ def build_review_feedback_records(all_review_items, selected_items):
 # 飞书推送
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_feishu_card(items, date_str):
+def build_feishu_card(items, date_str, audio_source_items=None):
     feishu_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)[:FEISHU_TOP_N]
+    audio_source_items = audio_source_items if audio_source_items is not None else items
     audio_candidates = sorted(
-        [it for it in items if is_audio_special_item(it)],
+        [it for it in audio_source_items if is_audio_special_item(it)],
         key=lambda x: x.get("heat_score", 0),
         reverse=True,
     )
@@ -6691,8 +6701,10 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
+    audio_special_pool = deduplicate_and_rank([dict(it) for it in all_items if is_audio_special_item(it)])
     final = deduplicate_and_rank(all_items)
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
+    print(f"      Audio special pool: {len(audio_special_pool)}")
 
     if not final:
         print("[ERROR] No items fetched. Check network. ❌")
@@ -6700,6 +6712,11 @@ def main():
 
     print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
     final = generate_chinese_summaries(final)
+    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
+    audio_source_items = []
+    for item in audio_special_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
+        url = str(item.get("url", "")).rstrip("/")
+        audio_source_items.append(final_by_url.get(url, item))
     review_candidates = [dict(item) for item in final]
 
      # ══════════════════════════════════════════════════════════════
@@ -6733,7 +6750,7 @@ def main():
     publish_to_pages(html, today)
     backup_script_to_github(today)
 
-    card = build_feishu_card(final, today)
+    card = build_feishu_card(final, today, audio_source_items=audio_source_items)
     feishu_ok = push_feishu(card)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
