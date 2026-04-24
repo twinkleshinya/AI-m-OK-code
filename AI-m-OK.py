@@ -315,7 +315,7 @@ WERSS_PASSWORD = os.environ.get(
     os.environ.get("WE_MP_RSS_PASSWORD", WERSS_LOCAL_ENV.get("WERSS_PASSWORD", WERSS_LOCAL_ENV.get("PASSWORD", ""))),
 ).strip()
 WERSS_TOKEN = os.environ.get("WERSS_TOKEN", os.environ.get("WE_MP_RSS_TOKEN", "")).strip()
-WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "40"))
+WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "120"))
 WERSS_AUTO_SUBSCRIBE = os.environ.get("WERSS_AUTO_SUBSCRIBE", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_AUTOSUBSCRIBE_LIMIT = int(os.environ.get("WERSS_AUTOSUBSCRIBE_LIMIT", str(len(WECHAT_OFFICIAL_ACCOUNTS))))
 WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
@@ -324,6 +324,7 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
     if x.strip()
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
@@ -2853,12 +2854,17 @@ def _refresh_werss_subscriptions(base, token):
     elif isinstance(data, list):
         rows = data
     recent_rows = [row for row in rows if _werss_row_recently_active(row)]
-    target_rows = _priority_werss_rows(recent_rows)[:max(0, WERSS_UPDATE_LIMIT)]
+    sorted_recent_rows = _priority_werss_rows(recent_rows)
+    if WERSS_UPDATE_ALL_RECENT:
+        target_rows = sorted_recent_rows
+    else:
+        target_rows = sorted_recent_rows[:max(0, WERSS_UPDATE_LIMIT)]
     stats = {
         "updated": 0,
         "failed": 0,
         "skipped": max(0, len(rows) - len(target_rows)),
         "eligible": len(recent_rows),
+        "all_recent": bool(WERSS_UPDATE_ALL_RECENT),
     }
     for row in target_rows:
         mp_id = str(row.get("id") or row.get("mp_id") or "").strip()
@@ -2898,9 +2904,10 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
                 )
             update_stats = _refresh_werss_subscriptions(base, token)
             if update_stats.get("eligible") or update_stats["updated"] or update_stats["failed"]:
+                refresh_mode = "全量刷新" if update_stats.get("all_recent") else f"限量刷新{WERSS_UPDATE_LIMIT}个"
                 print(
                     f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
-                    f"更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
+                    f"{refresh_mode}, 更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
                 )
         elif WERSS_AUTO_SUBSCRIBE:
             print("  [WARN] WeRSS 自动订阅跳过：后台登录失败，请检查 WERSS_USERNAME/WERSS_PASSWORD")
