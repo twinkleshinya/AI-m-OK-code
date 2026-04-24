@@ -3545,6 +3545,21 @@ def is_audio_special_item(item):
     )
 
 
+def classify_audio_topic(item):
+    text = build_item_filter_text(item, include_query=True)
+    rules = [
+        (r"播客|podcast|rss|节目", "播客"),
+        (r"配音|voice|speech|tts|asr|转写|字幕|语音", "语音"),
+        (r"music|音乐|作曲|soundtrack|suno|udio|audiocraft", "音乐"),
+        (r"game audio|游戏音频|wwise|fmod|unity|unreal|sound design", "游戏音频"),
+        (r"workflow|工作流|automation|agent|plugin|vst|daw|tool|工具|descript|elevenlabs", "工具/工作流"),
+    ]
+    for pattern, label in rules:
+        if re.search(pattern, text, re.IGNORECASE):
+            return label
+    return "其他"
+
+
 def wechat_keyword_gate(item):
     """
     公众号单独放宽门槛：
@@ -5931,6 +5946,28 @@ def pick_emoji(item):
     tags = infer_tags(item)
     return tags[0][2]
 
+
+def is_ai_special_tab_item(item):
+    source = str(item.get("source", "") or "")
+    practical_score = int(item.get("practical_score") or 0)
+    category = str(item.get("category", "") or "")
+    if item.get("is_priority_wechat"):
+        return True
+    if is_audio_special_item(item):
+        return True
+    if item.get("_pool") == "A":
+        return True
+    if practical_score >= max(PRACTICAL_MIN_SCORE, 2):
+        return True
+    if source in {
+        "Practical Guides", "Agent/Coding AI", "Audio Creator AI",
+        "Audio/Music/Game AI", "AI Frontier", WECHAT_SOURCE_NAME,
+    }:
+        return True
+    if category in {"开源", "技术突破", "应用落地", "研究"}:
+        return True
+    return False
+
 # ══════════════════════════════════════════════════════════════════════════════
 # HTML 生成
 # ══════════════════════════════════════════════════════════════════════════════
@@ -6014,6 +6051,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: white;
             border-color: transparent;
             box-shadow: 0 4px 18px rgba(102, 126, 234, 0.4);
+        }}
+        .tab-btn.special.active {{
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
         }}
         .tab-count {{
             display: inline-block;
@@ -6150,12 +6191,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <span class="stat">{count} 条精选</span>
                 <span class="stat">🌐 {intl_count} 条国际</span>
                 <span class="stat">🏮 {domestic_count} 条国内</span>
+                <span class="stat">✨ {special_count} 条AI专项</span>
                 <span class="stat">{source_count} 个来源</span>
             </div>
         </div>
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
             <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
+            <button class="tab-btn special" onclick="switchTab('special', this)">✨AI专项<span class="tab-count">{special_count}</span></button>
         </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
@@ -6165,6 +6208,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="tab-domestic" class="tab-content">
             <div class="cards-grid">
 {domestic_cards}
+            </div>
+        </div>
+        <div id="tab-special" class="tab-content">
+            <div class="cards-grid">
+{special_cards}
             </div>
         </div>
         <div class="footer">
@@ -6220,21 +6268,37 @@ def _build_card_html(item):
 def generate_html(items, date_str):
     intl_items = [it for it in items if it.get("source_type") != "domestic"]
     domestic_items = [it for it in items if it.get("source_type") == "domestic"]
+    special_items = []
+    seen_special = set()
+    ranked_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)
+    for it in ranked_items:
+        if not is_ai_special_tab_item(it):
+            continue
+        url = str(it.get("url", "") or "").rstrip("/")
+        if url and url in seen_special:
+            continue
+        if url:
+            seen_special.add(url)
+        special_items.append(it)
 
     intl_count = len(intl_items)
     domestic_count = len(domestic_items)
+    special_count = len(special_items)
     source_count = len(set(it["source"] for it in items))
 
     intl_cards = "\n".join(_build_card_html(item) for item in intl_items)
     domestic_cards = "\n".join(_build_card_html(item) for item in domestic_items)
+    special_cards = "\n".join(_build_card_html(item) for item in special_items)
 
     return HTML_TEMPLATE.format(
         date=date_str,
         intl_cards=intl_cards,
         domestic_cards=domestic_cards,
+        special_cards=special_cards,
         count=len(items),
         intl_count=intl_count,
         domestic_count=domestic_count,
+        special_count=special_count,
         source_count=source_count,
     )
 
@@ -6359,15 +6423,22 @@ def build_feishu_card(items, date_str):
         elements.append({"tag": "hr"})
         elements.append({
             "tag": "markdown",
-            "content": "<font color='orange'>**🎧 AI音频专项**</font>",
+            "content": "<font color='orange'>**🎧 AI音频**</font>",
             "text_size": "heading",
         })
-        elements.append({
-            "tag": "markdown",
-            "content": "<font color='grey'>聚焦音频/配音/播客/语音工作流与可复用实践</font>",
-        })
         elements.append({"tag": "hr"})
-        _append_news_items(audio_items)
+        audio_groups = {}
+        for item in audio_items:
+            label = classify_audio_topic(item)
+            audio_groups.setdefault(label, []).append(item)
+        for idx, (label, group_items) in enumerate(audio_groups.items()):
+            if idx > 0:
+                elements.append({"tag": "hr"})
+            elements.append({
+                "tag": "markdown",
+                "content": f"<font color='grey'>分类：{label}</font>",
+            })
+            _append_news_items(group_items)
 
     elements.append({"tag": "hr"})
 
