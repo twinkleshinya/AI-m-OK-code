@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import sqlite3
 import subprocess
 import time
 import shutil
@@ -209,6 +210,13 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "PaperWeekly",
     "夕小瑶科技说",
 }
+WECHAT_AUDIO_FOCUS_ACCOUNTS = {
+    "风亭韵律",
+    "audiokinetic官方",
+    "电影声音网Filmsound.cn",
+    "AI音频时代",
+    "上和弦",
+}
 
 AUDIO_CREATOR_PAGES = [
     "https://elevenlabs.io/blog",
@@ -308,7 +316,7 @@ WERSS_PASSWORD = os.environ.get(
     os.environ.get("WE_MP_RSS_PASSWORD", WERSS_LOCAL_ENV.get("WERSS_PASSWORD", WERSS_LOCAL_ENV.get("PASSWORD", ""))),
 ).strip()
 WERSS_TOKEN = os.environ.get("WERSS_TOKEN", os.environ.get("WE_MP_RSS_TOKEN", "")).strip()
-WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "40"))
+WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "0"))
 WERSS_AUTO_SUBSCRIBE = os.environ.get("WERSS_AUTO_SUBSCRIBE", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_AUTOSUBSCRIBE_LIMIT = int(os.environ.get("WERSS_AUTOSUBSCRIBE_LIMIT", str(len(WECHAT_OFFICIAL_ACCOUNTS))))
 WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
@@ -317,8 +325,10 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
     if x.strip()
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
-WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "8" if FAST_FETCH_MODE else "17"))
-WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "5"))
+WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
+WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
+WERSS_SQLITE_PATH = os.environ.get("WERSS_SQLITE_PATH", "").strip()
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
 
@@ -547,6 +557,16 @@ ENTERPRISE_BIZ_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+BUSINESS_FINANCE_FILTER = re.compile(
+    r"财经|注资|募资|投融资|融资额|领投|跟投|战投|投资人|投资机构|财务顾问"
+    r"|资本市场|一级市场|二级市场|商业观察|商业评论|商业周刊|商业版图"
+    r"|估值|IPO|上市|收购|并购|股权|资本|风投|创投|基金|财报|营收|利润|亏损|市值|股价|交易"
+    r"|天使轮|种子轮|pre-A|A轮|B轮|C轮|D轮|E轮"
+    r"|funding|raised|raises|investment|investor|investors|valuation|ipo|earnings|revenue|profit"
+    r"|stock|stocks|shares|market cap|venture capital|\bVC\b|\bPE\b|series\s*[A-Z]",
+    re.IGNORECASE,
+)
+
 PRACTICE_BOOST = re.compile(
     r"tutorial|how.to|实战|教程|部署|fine.?tun|微调|训练|推理|inference"
     r"|benchmark|评测|对比|测评|实测|体验|上手|接入|集成|API"
@@ -765,6 +785,18 @@ NON_PRACTICAL_NEWS_FILTER = re.compile(
     r"|building-trust-in-the-ai-era-with-privacy-led-ux"
     r"|privacy\s+led\s+ux|隐私.*用户体验|用户体验.*隐私|AI时代.*信任|建立信任"
     r"|枪击|袭击|遇袭|起诉|诉讼|争议|丑闻|爆料|传闻|泄露|安全事故|身亡|暴力",
+    re.IGNORECASE,
+)
+
+SECURITY_VULN_FILTER = re.compile(
+    r"漏洞|注入攻击|代码注入|恶意依赖|供应链攻击|dependency confusion|RCE\b|CVE-\d{4}-\d+"
+    r"|security vulnerability|vulnerability|security flaw|exploit|prompt injection attack",
+    re.IGNORECASE,
+)
+
+COMPANY_BIZ_HYPE_FILTER = re.compile(
+    r"黄仁勋|token工厂|数据中心转型|驱动AI未来|公司战略|战略升级|生态伙伴|生态建设"
+    r"|主题演讲|keynote|高管表示|CEO表示|总裁表示|创始人表示|业务价值难兑现|业务瓶颈",
     re.IGNORECASE,
 )
 
@@ -2601,6 +2633,7 @@ def _build_werss_item(source_name, row, query="WeRSS"):
 
 
 def _fetch_werss_api_articles(base, source_name, max_items=40):
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
     token = _werss_login(base)
     paths = [
         "/api/v1/wx/articles",
@@ -2623,7 +2656,7 @@ def _fetch_werss_api_articles(base, source_name, max_items=40):
                     continue
                 seen.add(url)
                 items.append(item)
-                if len(items) >= max_items:
+                if max_items and len(items) >= max_items:
                     return items
             if items:
                 return items
@@ -2645,6 +2678,7 @@ def _extract_werss_feed_urls(data, base):
 
 
 def _fetch_werss_feed_articles(base, source_name, max_items=40):
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
     urls = [
         f"{base.rstrip()}/feeds/all.atom",
         f"{base.rstrip()}/feeds/all.rss",
@@ -2661,7 +2695,7 @@ def _fetch_werss_feed_articles(base, source_name, max_items=40):
     items = []
     seen = set()
     for feed_url in urls:
-        part = parse_rss_feed(feed_url, source_name=source_name, max_entries=max_items, ai_filter=False)
+        part = parse_rss_feed(feed_url, source_name=source_name, max_entries=max_items or 200, ai_filter=False)
         for it in part:
             url = it.get("url", "").rstrip("/")
             if "mp.weixin.qq.com" not in url or url in seen:
@@ -2670,7 +2704,7 @@ def _fetch_werss_feed_articles(base, source_name, max_items=40):
             it["search_query"] = "WeRSS Feed"
             it["account_name"] = get_wechat_account_hint(it) or it.get("account_name", "")
             items.append(it)
-            if len(items) >= max_items:
+            if max_items and len(items) >= max_items:
                 return items
     return items
 
@@ -2729,6 +2763,122 @@ def _werss_feed_id_from_fakeid(fakeid):
         return f"MP_WXS_{decoded}"
     except Exception:
         return ""
+
+
+def _werss_row_feed_id(row):
+    if not isinstance(row, dict):
+        return ""
+    return str(
+        row.get("id")
+        or row.get("feed_id")
+        or row.get("mp_id")
+        or _werss_feed_id_from_fakeid(row.get("faker_id"))
+        or ""
+    ).strip()
+
+
+def _resolve_werss_sqlite_path():
+    candidates = []
+    explicit = WERSS_SQLITE_PATH or os.environ.get("WE_MP_RSS_SQLITE", "").strip()
+    if explicit:
+        candidates.append(Path(explicit))
+
+    db_url = str(
+        WERSS_LOCAL_ENV.get("DB")
+        or WERSS_LOCAL_ENV.get("WERSS_DB")
+        or ""
+    ).strip()
+    env_base = Path(WERSS_ENV_CANDIDATES[0]).parent if WERSS_ENV_CANDIDATES else Path.cwd()
+    if db_url.lower().startswith("sqlite:///"):
+        rel_path = db_url.split("sqlite:///", 1)[1].strip()
+        if rel_path:
+            candidates.append((env_base / rel_path).resolve())
+    candidates.extend([
+        env_base / "data" / "db.db",
+        Path(r"E:\jiangxy2\werss\data\db.db"),
+    ])
+
+    seen = set()
+    for path in candidates:
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except Exception:
+            resolved = Path(path)
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if resolved.exists():
+            return resolved
+    return None
+
+
+def _fetch_wechat_from_werss_sqlite(source_name, feed_ids=None, max_items=None):
+    db_path = _resolve_werss_sqlite_path()
+    if not db_path:
+        return []
+
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
+    min_publish_ts = int((datetime.now(BEIJING_TZ) - timedelta(days=max(7, WERSS_REFRESH_RECENT_DAYS))).timestamp())
+
+    clauses = [
+        "a.url like 'https://mp.weixin.qq.com/%'",
+        "coalesce(a.publish_time, 0) >= ?",
+    ]
+    params = [min_publish_ts]
+
+    clean_feed_ids = [str(x).strip() for x in (feed_ids or []) if str(x).strip()]
+    if clean_feed_ids:
+        placeholders = ",".join("?" for _ in clean_feed_ids)
+        clauses.append(f"a.mp_id in ({placeholders})")
+        params.extend(clean_feed_ids)
+
+    sql = f"""
+        select
+            a.mp_id,
+            a.title,
+            a.url,
+            a.description,
+            a.publish_time,
+            a.created_at,
+            a.updated_at,
+            f.mp_name
+        from articles a
+        left join feeds f on a.mp_id = f.id
+        where {' and '.join(clauses)}
+        order by coalesce(a.publish_time, 0) desc, a.created_at desc
+    """
+    if max_items:
+        sql += f" limit {max_items}"
+
+    items = []
+    seen = set()
+    try:
+        con = sqlite3.connect(str(db_path))
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        for row in cur.execute(sql, params).fetchall():
+            row = dict(row)
+            item = _build_werss_item(source_name, {
+                "article_url": row.get("url", ""),
+                "title": row.get("title", ""),
+                "digest": row.get("description", ""),
+                "mp_name": row.get("mp_name", ""),
+                "publish_time": row.get("publish_time") or row.get("updated_at") or row.get("created_at"),
+            }, query="WeRSS SQLite")
+            if not item:
+                continue
+            url = item.get("url", "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(item)
+            if max_items and len(items) >= max_items:
+                break
+        con.close()
+    except Exception:
+        return []
+    return items
 
 
 def _werss_subscribe_account(base, token, account):
@@ -2804,12 +2954,14 @@ def _priority_werss_rows(rows):
         name = str(row.get("mp_name") or row.get("nickname") or "").strip()
         article_count = int(row.get("article_count") or 0)
         max_publish = row.get("max_publish_time") or 0
+        is_audio_focus = name in WECHAT_AUDIO_FOCUS_ACCOUNTS
         is_priority = name in WECHAT_PRIORITY_ACCOUNTS
         return (
+            0 if is_audio_focus else 1,
             0 if is_priority else 1,
+            -int(max_publish or 0),
             priority_order.get(name, 999),
-            0 if article_count == 0 else 1,
-            int(max_publish or 0),
+            -article_count,
         )
 
     return sorted(rows, key=_sort_key)
@@ -2844,12 +2996,18 @@ def _refresh_werss_subscriptions(base, token):
     elif isinstance(data, list):
         rows = data
     recent_rows = [row for row in rows if _werss_row_recently_active(row)]
-    target_rows = _priority_werss_rows(recent_rows)[:max(0, WERSS_UPDATE_LIMIT)]
+    sorted_recent_rows = _priority_werss_rows(recent_rows)
+    if WERSS_UPDATE_ALL_RECENT:
+        target_rows = sorted_recent_rows
+    else:
+        target_rows = sorted_recent_rows[:max(0, WERSS_UPDATE_LIMIT)]
     stats = {
         "updated": 0,
         "failed": 0,
         "skipped": max(0, len(rows) - len(target_rows)),
         "eligible": len(recent_rows),
+        "all_recent": bool(WERSS_UPDATE_ALL_RECENT),
+        "target_feed_ids": [_werss_row_feed_id(row) for row in target_rows if _werss_row_feed_id(row)],
     }
     for row in target_rows:
         mp_id = str(row.get("id") or row.get("mp_id") or "").strip()
@@ -2880,6 +3038,7 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
     seen = set()
     for base in WERSS_BASES:
         token = _werss_login(base)
+        target_feed_ids = []
         if token:
             sub_stats = _ensure_werss_ai_subscriptions(base, token)
             if sub_stats["checked"]:
@@ -2889,12 +3048,27 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
                 )
             update_stats = _refresh_werss_subscriptions(base, token)
             if update_stats.get("eligible") or update_stats["updated"] or update_stats["failed"]:
+                refresh_mode = "全量刷新" if update_stats.get("all_recent") else f"限量刷新{WERSS_UPDATE_LIMIT}个"
                 print(
                     f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
-                    f"更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
+                    f"{refresh_mode}, 更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
                 )
+            target_feed_ids = update_stats.get("target_feed_ids") or []
         elif WERSS_AUTO_SUBSCRIBE:
             print("  [WARN] WeRSS 自动订阅跳过：后台登录失败，请检查 WERSS_USERNAME/WERSS_PASSWORD")
+        sqlite_items = _fetch_wechat_from_werss_sqlite(
+            source_name=source_name,
+            feed_ids=target_feed_ids,
+            max_items=max_items,
+        )
+        for it in sqlite_items:
+            url = it.get("url", "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(it)
+            if max_items and len(items) >= max_items:
+                return items
         api_items = _fetch_werss_api_articles(base, source_name=source_name, max_items=max_items)
         feed_items = _fetch_werss_feed_articles(base, source_name=source_name, max_items=max_items)
         for it in api_items + feed_items:
@@ -3560,6 +3734,73 @@ def classify_audio_topic(item):
     return "其他"
 
 
+def audio_editorial_excluded(item):
+    text = build_item_filter_text(item, include_query=False)
+    return bool(re.search(
+        r"冠军方案|NAB\s*20\d{2}.*发挥重要作用|产品与演示|展会|现场答疑|不见不散|仅限\d+周|限时优惠|永久免费"
+        r"|窗口期|上市开启|免费领取|送全套|7折优惠|正式开启中国区限时优惠",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def is_business_finance_noise(item):
+    text = build_item_filter_text(item, include_query=False)
+    url = str(item.get("url", "") or "")
+    return bool(
+        FUNDING_POLICY_FILTER.search(text)
+        or ENTERPRISE_BIZ_FILTER.search(text)
+        or BUSINESS_FINANCE_FILTER.search(text)
+        or INVESTMENT_URL_FILTER.search(url)
+    )
+
+
+def is_security_or_hype_noise(item):
+    text = build_item_filter_text(item, include_query=False)
+    return bool(
+        SECURITY_VULN_FILTER.search(text)
+        or COMPANY_BIZ_HYPE_FILTER.search(text)
+    )
+
+
+def audio_editorial_core_hit(item):
+    text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
+    return bool(re.search(
+        r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
+        r"|文本转语音|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-|ACE Studio|Steinberg|Cubase|Nuendo|SpectraLayers|UAD"
+        r"|\bDAW\b|\bVST\b|Fairlight|voice|speech|audio|sound design|dubbing",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def audio_editorial_priority(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not is_audio_special_item(item):
+        return False
+    if not audio_editorial_core_hit(item):
+        return False
+    if is_business_finance_noise(item):
+        return False
+    if is_security_or_hype_noise(item):
+        return False
+    if audio_editorial_excluded(item):
+        return False
+    strong_hit = bool(re.search(
+        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|音频生成|音乐生成|空间音频|实时交互"
+        r"|实时响应|听觉大模型|音频大模型|音频理解|音频编辑|功能更新|框架|Audio-Omni|Audio-Cogito|Vibe[Vv]oice"
+        r"|SOTA|成本下降|定价骤减|降价|一统|大一统",
+        text,
+        re.IGNORECASE,
+    ))
+    trend_hit = bool(re.search(
+        r"四大预判|爆发|落地|迎来.*时刻|重构|新标杆|工作流时代",
+        text,
+        re.IGNORECASE,
+    ))
+    return strong_hit or trend_hit
+
+
 def wechat_keyword_gate(item):
     """
     公众号单独放宽门槛：
@@ -3578,6 +3819,8 @@ def wechat_keyword_gate(item):
         return False
     if is_non_practical_news(item):
         return False
+    if audio_editorial_priority(item):
+        return True
     if not AI_CORE_PATTERN.search(support_text):
         return False
 
@@ -5164,6 +5407,58 @@ def extract_content_fingerprint(item):
     return "|".join(sorted(set(tokens))[:10])
 
 
+def extract_event_fingerprint(item):
+    title = normalize_title_key(item.get("title_zh") or item.get("title") or "")
+    if not title:
+        return ""
+
+    entities = []
+    for pattern, label in [
+        (r"\bdeepseek\b|深度求索|深度思考", "deepseek"),
+        (r"\bqwen\b|通义", "qwen"),
+        (r"\bopenai\b|chatgpt|gpt", "openai"),
+        (r"\bclaude\b|anthropic", "claude"),
+        (r"\bgemini\b|google", "gemini"),
+        (r"\bnvidia\b|英伟达|黄仁勋", "nvidia"),
+        (r"\baudio omni\b|audio-omni", "audio-omni"),
+        (r"\bvibevoice\b", "vibevoice"),
+        (r"\bace studio\b", "ace-studio"),
+    ]:
+        if re.search(pattern, title, re.IGNORECASE):
+            entities.append(label)
+
+    versions = re.findall(
+        r"\bv\d+(?:\.\d+)?(?:[\-\s]?(?:pro|flash|max|mini))?\b"
+        r"|\b\d+(?:\.\d+)?[bmkt]\b"
+        r"|1m|100万|百万|超长上下文|长上下文",
+        title,
+        re.IGNORECASE,
+    )
+
+    event_tags = []
+    for pattern, label in [
+        (r"发布|开源|release|launch|announc|推出", "release"),
+        (r"上下文|context", "context"),
+        (r"音频|audio|voice|speech|tts|asr|配音|转写", "audio"),
+        (r"浏览器|browser automation|自动化", "automation"),
+        (r"模型|model|大模型", "model"),
+    ]:
+        if re.search(pattern, title, re.IGNORECASE):
+            event_tags.append(label)
+
+    parts = []
+    for token in entities + versions + event_tags:
+        token = str(token).strip().lower()
+        if re.match(r"v\d+(?:\.\d+)?(?:[\-\s]?(?:pro|flash|max|mini))?$", token, re.IGNORECASE):
+            base = re.match(r"(v\d+(?:\.\d+)?)", token, re.IGNORECASE)
+            token = base.group(1).lower() if base else token
+        if token in {"1m", "100万", "百万", "超长上下文", "长上下文"}:
+            token = "long-context"
+        if token and token not in parts:
+            parts.append(token)
+    return "|".join(parts[:8])
+
+
 def practical_relevance_score(item):
     title = item.get("title", "")
     summary = item.get("summary", "")
@@ -5255,6 +5550,7 @@ def pool_bucket(item):
         return item["_pool"]
     practical_score = item.get("practical_score", practical_relevance_score(item))
     audio_score = item.get("audio_score", audio_relevance_score(item))
+    audio_editorial_hit = audio_editorial_priority(item)
     date_ok = bool(item.get("date"))
     reliable_source = item.get("source") in SOURCE_REGISTRY
     practical_hit = is_practical_candidate(item)
@@ -5263,7 +5559,7 @@ def pool_bucket(item):
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
     is_priority_wechat = bool(item.get("is_priority_wechat"))
 
-    if date_ok and reliable_source and (practical_hit or frontier_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2)):
+    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit):
         return "A"
     if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
@@ -5333,9 +5629,9 @@ def quality_filter(items):
     filtered = []
     pool_stats = {"A": 0, "B": 0}
     today = datetime.now(BEIJING_TZ)
-    funding_policy_count = 0
+    business_finance_filtered_count = 0
+    security_hype_filtered_count = 0
     non_tech_filtered_count = 0
-    enterprise_biz_filtered_count = 0
     practical_filtered_count = 0
     hard_practical_filtered_count = 0
     # 日期无法解析/超过时效统计
@@ -5424,20 +5720,15 @@ def quality_filter(items):
             date_missing_filtered_count += 1
             continue
 
-        if FUNDING_POLICY_FILTER.search(text):
-            # 投资/商业类直接过滤
-            funding_policy_count += 1
+        if is_business_finance_noise(item):
+            business_finance_filtered_count += 1
             continue
-        if INVESTMENT_URL_FILTER.search(url):
-            funding_policy_count += 1
+        if is_security_or_hype_noise(item):
+            security_hype_filtered_count += 1
             continue
 
         if NON_TECH_FILTER.search(text) and not AI_EXEMPT.search(text):
             non_tech_filtered_count += 1
-            continue
-
-        if ENTERPRISE_BIZ_FILTER.search(text):
-            enterprise_biz_filtered_count += 1
             continue
 
         # 🚀 严格拦截：只要匹配到产品特征，或者被智能识别为产品首页，直接丢弃！
@@ -5472,8 +5763,10 @@ def quality_filter(items):
 
     if non_tech_filtered_count > 0:
         print(f"      [v2.6] 非技术向内容过滤: {non_tech_filtered_count} 条")
-    if enterprise_biz_filtered_count > 0:
-        print(f"      [v2.7] 企业商务类新闻过滤: {enterprise_biz_filtered_count} 条")
+    if business_finance_filtered_count > 0:
+        print(f"      [v3.5] 商业/财经/融资类过滤: {business_finance_filtered_count} 条")
+    if security_hype_filtered_count > 0:
+        print(f"      [v3.6] 安全漏洞/公司商务类过滤: {security_hype_filtered_count} 条")
     if practical_filtered_count > 0:
         print(f"      [v3.3] 实用/复用/创新不足过滤: {practical_filtered_count} 条")
     if hard_practical_filtered_count > 0:
@@ -5557,6 +5850,7 @@ def deduplicate_and_rank(all_items):
     seen_urls = set()
     seen_titles = []
     seen_fingerprints = {}
+    seen_event_fingerprints = {}
     deduped = []
 
     items.sort(
@@ -5570,6 +5864,7 @@ def deduplicate_and_rank(all_items):
         canonical_url = canonicalize_url_for_history(raw_url)
         title = item.get("title", "")
         fp = extract_content_fingerprint(item)
+        event_fp = extract_event_fingerprint(item)
         title_key = normalize_title_key(item.get("title_zh") or title)
 
         if not title:
@@ -5602,6 +5897,22 @@ def deduplicate_and_rank(all_items):
                     continue
             else:
                 seen_fingerprints[fp] = item
+
+        if event_fp:
+            prev = seen_event_fingerprints.get(event_fp)
+            if prev is not None:
+                old_score = prev.get("heat_score", 0) + prev.get("_completeness", 0) / 100.0
+                new_score = item.get("heat_score", 0) + item.get("_completeness", 0) / 100.0
+                if new_score > old_score:
+                    try:
+                        deduped.remove(prev)
+                    except ValueError:
+                        pass
+                    seen_event_fingerprints[event_fp] = item
+                else:
+                    continue
+            else:
+                seen_event_fingerprints[event_fp] = item
 
         if canonical_url:
             seen_urls.add(canonical_url)
@@ -6187,19 +6498,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="logo">\U0001f955</div>
             <h1>AI'm OK-{date}</h1>
             <div class="subtitle">每日AI行业资讯精选 | 国内外多源聚合 | 用最少的时间掌握最新动态</div>
-            <div class="stats">
-                <span class="stat">{count} 条精选</span>
-                <span class="stat">🌐 {intl_count} 条国际</span>
-                <span class="stat">🏮 {domestic_count} 条国内</span>
-                <span class="stat">✨ {special_count} 条AI专项</span>
-                <span class="stat">{source_count} 个来源</span>
-            </div>
+        <div class="stats">
+            <span class="stat">{count} 条精选</span>
+            <span class="stat">🌐 {intl_count} 条国际</span>
+            <span class="stat">🏮 {domestic_count} 条国内</span>
+            <span class="stat">🎧 {audio_count} 条AI音频</span>
+            <span class="stat">{source_count} 个来源</span>
         </div>
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
-            <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
-            <button class="tab-btn special" onclick="switchTab('special', this)">✨AI专项<span class="tab-count">{special_count}</span></button>
-        </div>
+    </div>
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
+        <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
+        <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
+    </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
 {intl_cards}
@@ -6210,10 +6521,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 {domestic_cards}
             </div>
         </div>
-        <div id="tab-special" class="tab-content">
-            <div class="cards-grid">
-{special_cards}
-            </div>
+    <div id="tab-audio" class="tab-content">
+        <div class="cards-grid">
+{audio_cards}
+        </div>
         </div>
         <div class="footer">
             \U0001f955 由 AI'm OK v3.2 自动生成 | {date} | 国内外 {source_count} 源聚合
@@ -6266,41 +6577,92 @@ def _build_card_html(item):
     )
 
 def generate_html(items, date_str):
-    intl_items = [it for it in items if it.get("source_type") != "domestic"]
-    domestic_items = [it for it in items if it.get("source_type") == "domestic"]
-    special_items = []
-    seen_special = set()
-    ranked_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)
-    for it in ranked_items:
-        if not is_ai_special_tab_item(it):
-            continue
-        url = str(it.get("url", "") or "").rstrip("/")
-        if url and url in seen_special:
-            continue
-        if url:
-            seen_special.add(url)
-        special_items.append(it)
+    audio_special_items = select_audio_special_items(
+        items,
+        limit=max(len(items), max(FEISHU_AUDIO_TOP_N * 8, 24)),
+    )
+    audio_urls = {
+        str(it.get("url", "") or "").rstrip("/")
+        for it in audio_special_items
+        if it.get("url")
+    }
+    intl_items = [
+        it for it in items
+        if it.get("source_type") != "domestic"
+        and str(it.get("url", "") or "").rstrip("/") not in audio_urls
+    ]
+    domestic_items = [
+        it for it in items
+        if it.get("source_type") == "domestic"
+        and str(it.get("url", "") or "").rstrip("/") not in audio_urls
+    ]
 
     intl_count = len(intl_items)
     domestic_count = len(domestic_items)
-    special_count = len(special_items)
+    audio_count = len(audio_special_items)
     source_count = len(set(it["source"] for it in items))
 
     intl_cards = "\n".join(_build_card_html(item) for item in intl_items)
     domestic_cards = "\n".join(_build_card_html(item) for item in domestic_items)
-    special_cards = "\n".join(_build_card_html(item) for item in special_items)
+    audio_cards = "\n".join(_build_card_html(item) for item in audio_special_items)
 
     return HTML_TEMPLATE.format(
         date=date_str,
         intl_cards=intl_cards,
         domestic_cards=domestic_cards,
-        special_cards=special_cards,
+        audio_cards=audio_cards,
         count=len(items),
         intl_count=intl_count,
         domestic_count=domestic_count,
-        special_count=special_count,
+        audio_count=audio_count,
         source_count=source_count,
     )
+
+
+def select_audio_special_items(items, limit=None):
+    limit = limit or max(FEISHU_AUDIO_TOP_N * 4, 12)
+    candidates = []
+    for item in items:
+        if is_business_finance_noise(item):
+            continue
+        if not is_audio_special_item(item):
+            continue
+        if not audio_editorial_core_hit(item):
+            continue
+        if audio_editorial_excluded(item):
+            continue
+        if item.get("source") == WECHAT_SOURCE_NAME:
+            if not (wechat_keyword_gate(item) or audio_editorial_priority(item)):
+                continue
+        score = float(item.get("heat_score", 0) or 0)
+        score += audio_relevance_score(item) * 12
+        if audio_editorial_priority(item):
+            score += 40
+        if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
+            score += 12
+        if item.get("is_priority_wechat"):
+            score += 8
+        candidates.append((score, item))
+
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    selected = []
+    seen_urls = set()
+    seen_titles = []
+    for _, item in candidates:
+        url = str(item.get("url", "") or "").rstrip("/")
+        title = str(item.get("title", "") or "").strip()
+        if url and url in seen_urls:
+            continue
+        if title and is_duplicate_title(title, seen_titles, threshold=0.62):
+            continue
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.append(title)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def build_review_feedback_records(all_review_items, selected_items):
@@ -6332,12 +6694,12 @@ def build_review_feedback_records(all_review_items, selected_items):
 # 飞书推送
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_feishu_card(items, date_str):
+def build_feishu_card(items, date_str, audio_source_items=None):
     feishu_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)[:FEISHU_TOP_N]
-    audio_candidates = sorted(
-        [it for it in items if is_audio_special_item(it)],
-        key=lambda x: x.get("heat_score", 0),
-        reverse=True,
+    audio_source_items = audio_source_items if audio_source_items is not None else items
+    audio_candidates = select_audio_special_items(
+        audio_source_items,
+        limit=max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N),
     )
 
     total_count = len(items)
@@ -6358,8 +6720,10 @@ def build_feishu_card(items, date_str):
         if not audio_items:
             audio_items = [it for it in feishu_items if is_audio_special_item(it)][: min(3, FEISHU_AUDIO_TOP_N)]
 
-    intl_items = [it for it in feishu_items if it.get("source_type") != "domestic"]
-    domestic_items = [it for it in feishu_items if it.get("source_type") == "domestic"]
+    audio_urls = {str(it.get("url", "")).rstrip("/") for it in audio_items if it.get("url")}
+    base_feishu_items = [it for it in feishu_items if str(it.get("url", "")).rstrip("/") not in audio_urls]
+    intl_items = [it for it in base_feishu_items if it.get("source_type") != "domestic"]
+    domestic_items = [it for it in base_feishu_items if it.get("source_type") == "domestic"]
 
     elements = []
 
@@ -6423,22 +6787,11 @@ def build_feishu_card(items, date_str):
         elements.append({"tag": "hr"})
         elements.append({
             "tag": "markdown",
-            "content": "<font color='orange'>**🎧 AI音频**</font>",
+            "content": f"<font color='orange'>**🎧 AI音频专区**</font>",
             "text_size": "heading",
         })
         elements.append({"tag": "hr"})
-        audio_groups = {}
-        for item in audio_items:
-            label = classify_audio_topic(item)
-            audio_groups.setdefault(label, []).append(item)
-        for idx, (label, group_items) in enumerate(audio_groups.items()):
-            if idx > 0:
-                elements.append({"tag": "hr"})
-            elements.append({
-                "tag": "markdown",
-                "content": f"<font color='grey'>分类：{label}</font>",
-            })
-            _append_news_items(group_items)
+        _append_news_items(audio_items)
 
     elements.append({"tag": "hr"})
 
@@ -6691,8 +7044,28 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
+    quality_passed_items = quality_filter([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
+    audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
+    audio_injected = []
+    final_urls = {
+        str(it.get("url", "")).rstrip("/")
+        for it in final
+        if it.get("url")
+    }
+    for item in audio_special_pool:
+        url = str(item.get("url", "")).rstrip("/")
+        if not url or url in final_urls:
+            continue
+        audio_injected.append(item)
+        final.append(item)
+        final_urls.add(url)
+        if len(audio_injected) >= max(FEISHU_AUDIO_TOP_N, 4):
+            break
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
+    print(f"      Audio special pool: {len(audio_special_pool)}")
+    if audio_injected:
+        print(f"      Audio injected for review/push: {len(audio_injected)}")
 
     if not final:
         print("[ERROR] No items fetched. Check network. ❌")
@@ -6700,6 +7073,11 @@ def main():
 
     print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
     final = generate_chinese_summaries(final)
+    audio_review_urls = {
+        str(item.get("url", "")).rstrip("/")
+        for item in audio_special_pool
+        if item.get("url")
+    }
     review_candidates = [dict(item) for item in final]
 
      # ══════════════════════════════════════════════════════════════
@@ -6713,6 +7091,7 @@ def main():
             pick_emoji_func=pick_emoji,
             get_source_info_func=get_source_info,
             port=18088,
+            audio_item_urls=audio_review_urls,
         )
         if not final:
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
@@ -6724,6 +7103,25 @@ def main():
     else:
         print("\n⏩ [Phase F.5] --auto 模式，跳过人工审核")
 
+    selected_audio_pool = select_audio_special_items([dict(it) for it in final])
+    if not selected_audio_pool and audio_special_pool:
+        for item in audio_special_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url:
+                continue
+            if any(str(existing.get("url", "")).rstrip("/") == url for existing in final):
+                continue
+            final.append(item)
+            selected_audio_pool = [item]
+            print("      [v3.6] 已补入 1 条 AI音频资讯，满足音频专区最小保留")
+            break
+
+    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
+    audio_source_items = []
+    for item in selected_audio_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
+        url = str(item.get("url", "")).rstrip("/")
+        audio_source_items.append(final_by_url.get(url, item))
+
     html = generate_html(final, today)
     output_path = OUTPUT_DIR / f"AI-m-OK-{today}.html"
     output_path.write_text(html, encoding="utf-8")
@@ -6733,7 +7131,7 @@ def main():
     publish_to_pages(html, today)
     backup_script_to_github(today)
 
-    card = build_feishu_card(final, today)
+    card = build_feishu_card(final, today, audio_source_items=audio_source_items)
     feishu_ok = push_feishu(card)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
