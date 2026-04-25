@@ -790,13 +790,21 @@ NON_PRACTICAL_NEWS_FILTER = re.compile(
 
 SECURITY_VULN_FILTER = re.compile(
     r"漏洞|注入攻击|代码注入|恶意依赖|供应链攻击|dependency confusion|RCE\b|CVE-\d{4}-\d+"
-    r"|security vulnerability|vulnerability|security flaw|exploit|prompt injection attack",
+    r"|security vulnerability|vulnerability|security flaw|exploit|prompt injection attack"
+    r"|indirect\s+.*injection|间接注入|agents\.md|恶意提示注入|提示注入攻击",
     re.IGNORECASE,
 )
 
 COMPANY_BIZ_HYPE_FILTER = re.compile(
     r"黄仁勋|token工厂|数据中心转型|驱动AI未来|公司战略|战略升级|生态伙伴|生态建设"
     r"|主题演讲|keynote|高管表示|CEO表示|总裁表示|创始人表示|业务价值难兑现|业务瓶颈",
+    re.IGNORECASE,
+)
+
+PRACTICE_EXCLUDED_TOPIC_FILTER = re.compile(
+    r"航天|卫星|太空|激光通信|火箭|航空航天|space\b|satellite|aerospace"
+    r"|医疗|医院|医生|诊室|疗效|病人|看病|临床|medical|doctor|hospital|clinic"
+    r"|售罄|短缺|缺货|高价转售|转售|发货|黄牛|eBay|ebay|scalper|resale|out of stock|sold out",
     re.IGNORECASE,
 )
 
@@ -1008,6 +1016,9 @@ def history_keys_from_item(item):
     fp = extract_content_fingerprint(item)
     if fp:
         keys.add(f"fp::{fp}")
+    event_fp = extract_event_fingerprint(item)
+    if event_fp:
+        keys.add(f"event::{event_fp}")
     return keys
 
 
@@ -1035,6 +1046,13 @@ def _normalize_history_entries(raw_data):
             fp = str(entry.get("fp", "") or "").strip()
             if fp:
                 normalized.add(f"fp::{fp}")
+            event_fp = str(entry.get("event_fp", "") or "").strip()
+            if event_fp:
+                normalized.add(f"event::{event_fp}")
+            else:
+                inferred_event_fp = extract_event_fingerprint(entry)
+                if inferred_event_fp:
+                    normalized.add(f"event::{inferred_event_fp}")
     return normalized
 
 
@@ -3708,11 +3726,12 @@ def practical_keyword_gate(item):
 
 def is_audio_special_item(item):
     text = build_item_filter_text(item, include_query=True)
-    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI"}:
-        return True
+    if is_security_or_hype_noise(item):
+        return False
     return bool(
         re.search(
-            r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft",
+            r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft"
+            r"|ai音乐|音乐生成|配乐|音效|audio-omni|vibevoice|ace studio",
             text,
             re.IGNORECASE,
         )
@@ -3738,7 +3757,8 @@ def audio_editorial_excluded(item):
     text = build_item_filter_text(item, include_query=False)
     return bool(re.search(
         r"冠军方案|NAB\s*20\d{2}.*发挥重要作用|产品与演示|展会|现场答疑|不见不散|仅限\d+周|限时优惠|永久免费"
-        r"|窗口期|上市开启|免费领取|送全套|7折优惠|正式开启中国区限时优惠",
+        r"|窗口期|上市开启|免费领取|送全套|7折优惠|正式开启中国区限时优惠"
+        r"|全网首发|无限用|最长\d+秒视频|参考图|剧情等生成",
         text,
         re.IGNORECASE,
     ))
@@ -3761,6 +3781,11 @@ def is_security_or_hype_noise(item):
         SECURITY_VULN_FILTER.search(text)
         or COMPANY_BIZ_HYPE_FILTER.search(text)
     )
+
+
+def is_practice_excluded_topic(item):
+    text = build_item_filter_text(item, include_query=False)
+    return bool(PRACTICE_EXCLUDED_TOPIC_FILTER.search(text))
 
 
 def audio_editorial_core_hit(item):
@@ -5446,14 +5471,23 @@ def extract_event_fingerprint(item):
         if re.search(pattern, title, re.IGNORECASE):
             event_tags.append(label)
 
-    parts = []
-    for token in entities + versions + event_tags:
+    normalized_versions = []
+    for token in versions:
         token = str(token).strip().lower()
         if re.match(r"v\d+(?:\.\d+)?(?:[\-\s]?(?:pro|flash|max|mini))?$", token, re.IGNORECASE):
             base = re.match(r"(v\d+(?:\.\d+)?)", token, re.IGNORECASE)
             token = base.group(1).lower() if base else token
         if token in {"1m", "100万", "百万", "超长上下文", "长上下文"}:
             token = "long-context"
+        if token and token not in normalized_versions:
+            normalized_versions.append(token)
+
+    if entities and normalized_versions:
+        return "|".join((entities + normalized_versions)[:4])
+
+    parts = []
+    for token in entities + normalized_versions + event_tags:
+        token = str(token).strip().lower()
         if token and token not in parts:
             parts.append(token)
     return "|".join(parts[:8])
@@ -5726,6 +5760,9 @@ def quality_filter(items):
         if is_security_or_hype_noise(item):
             security_hype_filtered_count += 1
             continue
+        if is_practice_excluded_topic(item):
+            non_tech_filtered_count += 1
+            continue
 
         if NON_TECH_FILTER.search(text) and not AI_EXEMPT.search(text):
             non_tech_filtered_count += 1
@@ -5875,6 +5912,8 @@ def deduplicate_and_rank(all_items):
         if title_key and f"title::{title_key}" in history_keys:
             history_hit = True
         if fp and f"fp::{fp}" in history_keys:
+            history_hit = True
+        if event_fp and f"event::{event_fp}" in history_keys:
             history_hit = True
         if canonical_url in seen_urls or history_hit:
             continue
@@ -7081,9 +7120,9 @@ def main():
     review_candidates = [dict(item) for item in final]
 
      # ══════════════════════════════════════════════════════════════
-    # ★ 新增 Phase F.5：本地 Web 审核（传入 --auto 参数可跳过）
+    # ★ 人工审核为飞书推送前的硬约束
     # ══════════════════════════════════════════════════════════════
-    if "--auto" not in sys.argv and start_review_server is not None:
+    if start_review_server is not None:
         print("\n🔍 [Phase F.5] 启动本地审核页面...")
         final = start_review_server(
             items=review_candidates,
@@ -7098,23 +7137,14 @@ def main():
             return
         print(f"      审核后保留 {len(final)} 条，继续推送流程...")
         append_review_feedback(build_review_feedback_records(review_candidates, final))
-    elif "--auto" not in sys.argv and start_review_server is None:
-        print("\n⏩ [Phase F.5] 未找到 review_server.py，自动跳过人工审核")
-    else:
-        print("\n⏩ [Phase F.5] --auto 模式，跳过人工审核")
+    elif start_review_server is None:
+        print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
+        return
 
     selected_audio_pool = select_audio_special_items([dict(it) for it in final])
-    if not selected_audio_pool and audio_special_pool:
-        for item in audio_special_pool:
-            url = str(item.get("url", "")).rstrip("/")
-            if not url:
-                continue
-            if any(str(existing.get("url", "")).rstrip("/") == url for existing in final):
-                continue
-            final.append(item)
-            selected_audio_pool = [item]
-            print("      [v3.6] 已补入 1 条 AI音频资讯，满足音频专区最小保留")
-            break
+    if not selected_audio_pool:
+        print("[ERROR] 人工审核后未保留任何 AI音频资讯，本次不推送飞书。")
+        return
 
     final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
     audio_source_items = []
