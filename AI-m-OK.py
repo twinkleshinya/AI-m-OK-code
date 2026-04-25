@@ -788,6 +788,18 @@ NON_PRACTICAL_NEWS_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+SECURITY_VULN_FILTER = re.compile(
+    r"漏洞|注入攻击|代码注入|恶意依赖|供应链攻击|dependency confusion|RCE\b|CVE-\d{4}-\d+"
+    r"|security vulnerability|vulnerability|security flaw|exploit|prompt injection attack",
+    re.IGNORECASE,
+)
+
+COMPANY_BIZ_HYPE_FILTER = re.compile(
+    r"黄仁勋|token工厂|数据中心转型|驱动AI未来|公司战略|战略升级|生态伙伴|生态建设"
+    r"|主题演讲|keynote|高管表示|CEO表示|总裁表示|创始人表示|业务价值难兑现|业务瓶颈",
+    re.IGNORECASE,
+)
+
 ORDINARY_HINT_PATTERN = re.compile("|".join(ORDINARY_HINT_TERMS), re.IGNORECASE)
 REQUIRED_PATTERN = re.compile("|".join(REQUIRED_TERMS), re.IGNORECASE)
 EXCLUDE_PATTERN = re.compile("|".join(EXCLUDE_TERMS), re.IGNORECASE)
@@ -3743,6 +3755,14 @@ def is_business_finance_noise(item):
     )
 
 
+def is_security_or_hype_noise(item):
+    text = build_item_filter_text(item, include_query=False)
+    return bool(
+        SECURITY_VULN_FILTER.search(text)
+        or COMPANY_BIZ_HYPE_FILTER.search(text)
+    )
+
+
 def audio_editorial_core_hit(item):
     text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
     return bool(re.search(
@@ -3761,6 +3781,8 @@ def audio_editorial_priority(item):
     if not audio_editorial_core_hit(item):
         return False
     if is_business_finance_noise(item):
+        return False
+    if is_security_or_hype_noise(item):
         return False
     if audio_editorial_excluded(item):
         return False
@@ -5385,6 +5407,58 @@ def extract_content_fingerprint(item):
     return "|".join(sorted(set(tokens))[:10])
 
 
+def extract_event_fingerprint(item):
+    title = normalize_title_key(item.get("title_zh") or item.get("title") or "")
+    if not title:
+        return ""
+
+    entities = []
+    for pattern, label in [
+        (r"\bdeepseek\b|深度求索|深度思考", "deepseek"),
+        (r"\bqwen\b|通义", "qwen"),
+        (r"\bopenai\b|chatgpt|gpt", "openai"),
+        (r"\bclaude\b|anthropic", "claude"),
+        (r"\bgemini\b|google", "gemini"),
+        (r"\bnvidia\b|英伟达|黄仁勋", "nvidia"),
+        (r"\baudio omni\b|audio-omni", "audio-omni"),
+        (r"\bvibevoice\b", "vibevoice"),
+        (r"\bace studio\b", "ace-studio"),
+    ]:
+        if re.search(pattern, title, re.IGNORECASE):
+            entities.append(label)
+
+    versions = re.findall(
+        r"\bv\d+(?:\.\d+)?(?:[\-\s]?(?:pro|flash|max|mini))?\b"
+        r"|\b\d+(?:\.\d+)?[bmkt]\b"
+        r"|1m|100万|百万|超长上下文|长上下文",
+        title,
+        re.IGNORECASE,
+    )
+
+    event_tags = []
+    for pattern, label in [
+        (r"发布|开源|release|launch|announc|推出", "release"),
+        (r"上下文|context", "context"),
+        (r"音频|audio|voice|speech|tts|asr|配音|转写", "audio"),
+        (r"浏览器|browser automation|自动化", "automation"),
+        (r"模型|model|大模型", "model"),
+    ]:
+        if re.search(pattern, title, re.IGNORECASE):
+            event_tags.append(label)
+
+    parts = []
+    for token in entities + versions + event_tags:
+        token = str(token).strip().lower()
+        if re.match(r"v\d+(?:\.\d+)?(?:[\-\s]?(?:pro|flash|max|mini))?$", token, re.IGNORECASE):
+            base = re.match(r"(v\d+(?:\.\d+)?)", token, re.IGNORECASE)
+            token = base.group(1).lower() if base else token
+        if token in {"1m", "100万", "百万", "超长上下文", "长上下文"}:
+            token = "long-context"
+        if token and token not in parts:
+            parts.append(token)
+    return "|".join(parts[:8])
+
+
 def practical_relevance_score(item):
     title = item.get("title", "")
     summary = item.get("summary", "")
@@ -5556,6 +5630,7 @@ def quality_filter(items):
     pool_stats = {"A": 0, "B": 0}
     today = datetime.now(BEIJING_TZ)
     business_finance_filtered_count = 0
+    security_hype_filtered_count = 0
     non_tech_filtered_count = 0
     practical_filtered_count = 0
     hard_practical_filtered_count = 0
@@ -5648,6 +5723,9 @@ def quality_filter(items):
         if is_business_finance_noise(item):
             business_finance_filtered_count += 1
             continue
+        if is_security_or_hype_noise(item):
+            security_hype_filtered_count += 1
+            continue
 
         if NON_TECH_FILTER.search(text) and not AI_EXEMPT.search(text):
             non_tech_filtered_count += 1
@@ -5687,6 +5765,8 @@ def quality_filter(items):
         print(f"      [v2.6] 非技术向内容过滤: {non_tech_filtered_count} 条")
     if business_finance_filtered_count > 0:
         print(f"      [v3.5] 商业/财经/融资类过滤: {business_finance_filtered_count} 条")
+    if security_hype_filtered_count > 0:
+        print(f"      [v3.6] 安全漏洞/公司商务类过滤: {security_hype_filtered_count} 条")
     if practical_filtered_count > 0:
         print(f"      [v3.3] 实用/复用/创新不足过滤: {practical_filtered_count} 条")
     if hard_practical_filtered_count > 0:
@@ -5770,6 +5850,7 @@ def deduplicate_and_rank(all_items):
     seen_urls = set()
     seen_titles = []
     seen_fingerprints = {}
+    seen_event_fingerprints = {}
     deduped = []
 
     items.sort(
@@ -5783,6 +5864,7 @@ def deduplicate_and_rank(all_items):
         canonical_url = canonicalize_url_for_history(raw_url)
         title = item.get("title", "")
         fp = extract_content_fingerprint(item)
+        event_fp = extract_event_fingerprint(item)
         title_key = normalize_title_key(item.get("title_zh") or title)
 
         if not title:
@@ -5815,6 +5897,22 @@ def deduplicate_and_rank(all_items):
                     continue
             else:
                 seen_fingerprints[fp] = item
+
+        if event_fp:
+            prev = seen_event_fingerprints.get(event_fp)
+            if prev is not None:
+                old_score = prev.get("heat_score", 0) + prev.get("_completeness", 0) / 100.0
+                new_score = item.get("heat_score", 0) + item.get("_completeness", 0) / 100.0
+                if new_score > old_score:
+                    try:
+                        deduped.remove(prev)
+                    except ValueError:
+                        pass
+                    seen_event_fingerprints[event_fp] = item
+                else:
+                    continue
+            else:
+                seen_event_fingerprints[event_fp] = item
 
         if canonical_url:
             seen_urls.add(canonical_url)
@@ -6946,10 +7044,28 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
+    quality_passed_items = quality_filter([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
-    audio_special_pool = select_audio_special_items([dict(it) for it in final])
+    audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
+    audio_injected = []
+    final_urls = {
+        str(it.get("url", "")).rstrip("/")
+        for it in final
+        if it.get("url")
+    }
+    for item in audio_special_pool:
+        url = str(item.get("url", "")).rstrip("/")
+        if not url or url in final_urls:
+            continue
+        audio_injected.append(item)
+        final.append(item)
+        final_urls.add(url)
+        if len(audio_injected) >= max(FEISHU_AUDIO_TOP_N, 4):
+            break
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
+    if audio_injected:
+        print(f"      Audio injected for review/push: {len(audio_injected)}")
 
     if not final:
         print("[ERROR] No items fetched. Check network. ❌")
@@ -6957,11 +7073,6 @@ def main():
 
     print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
     final = generate_chinese_summaries(final)
-    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
-    audio_source_items = []
-    for item in audio_special_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
-        url = str(item.get("url", "")).rstrip("/")
-        audio_source_items.append(final_by_url.get(url, item))
     audio_review_urls = {
         str(item.get("url", "")).rstrip("/")
         for item in audio_special_pool
@@ -6991,6 +7102,25 @@ def main():
         print("\n⏩ [Phase F.5] 未找到 review_server.py，自动跳过人工审核")
     else:
         print("\n⏩ [Phase F.5] --auto 模式，跳过人工审核")
+
+    selected_audio_pool = select_audio_special_items([dict(it) for it in final])
+    if not selected_audio_pool and audio_special_pool:
+        for item in audio_special_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url:
+                continue
+            if any(str(existing.get("url", "")).rstrip("/") == url for existing in final):
+                continue
+            final.append(item)
+            selected_audio_pool = [item]
+            print("      [v3.6] 已补入 1 条 AI音频资讯，满足音频专区最小保留")
+            break
+
+    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
+    audio_source_items = []
+    for item in selected_audio_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
+        url = str(item.get("url", "")).rstrip("/")
+        audio_source_items.append(final_by_url.get(url, item))
 
     html = generate_html(final, today)
     output_path = OUTPUT_DIR / f"AI-m-OK-{today}.html"
