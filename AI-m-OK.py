@@ -3712,6 +3712,50 @@ def classify_audio_topic(item):
     return "其他"
 
 
+def audio_editorial_excluded(item):
+    text = build_item_filter_text(item, include_query=False)
+    return bool(re.search(
+        r"冠军方案|NAB\s*20\d{2}.*发挥重要作用|产品与演示|展会|现场答疑|不见不散|仅限\d+周|限时优惠|永久免费"
+        r"|窗口期|上市开启|免费领取|送全套|7折优惠|正式开启中国区限时优惠",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def audio_editorial_core_hit(item):
+    text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
+    return bool(re.search(
+        r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
+        r"|文本转语音|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-|ACE Studio|Steinberg|Cubase|Nuendo|SpectraLayers|UAD"
+        r"|\bDAW\b|\bVST\b|Fairlight|voice|speech|audio|sound design|dubbing",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def audio_editorial_priority(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not is_audio_special_item(item):
+        return False
+    if not audio_editorial_core_hit(item):
+        return False
+    if audio_editorial_excluded(item):
+        return False
+    strong_hit = bool(re.search(
+        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|音频生成|音乐生成|空间音频|实时交互"
+        r"|实时响应|听觉大模型|音频大模型|音频理解|音频编辑|功能更新|框架|Audio-Omni|Audio-Cogito|Vibe[Vv]oice"
+        r"|SOTA|成本下降|定价骤减|降价|一统|大一统",
+        text,
+        re.IGNORECASE,
+    ))
+    trend_hit = bool(re.search(
+        r"四大预判|爆发|落地|迎来.*时刻|重构|新标杆|工作流时代",
+        text,
+        re.IGNORECASE,
+    ))
+    return strong_hit or trend_hit
+
+
 def wechat_keyword_gate(item):
     """
     公众号单独放宽门槛：
@@ -3730,6 +3774,8 @@ def wechat_keyword_gate(item):
         return False
     if is_non_practical_news(item):
         return False
+    if audio_editorial_priority(item):
+        return True
     if not AI_CORE_PATTERN.search(support_text):
         return False
 
@@ -5407,6 +5453,7 @@ def pool_bucket(item):
         return item["_pool"]
     practical_score = item.get("practical_score", practical_relevance_score(item))
     audio_score = item.get("audio_score", audio_relevance_score(item))
+    audio_editorial_hit = audio_editorial_priority(item)
     date_ok = bool(item.get("date"))
     reliable_source = item.get("source") in SOURCE_REGISTRY
     practical_hit = is_practical_candidate(item)
@@ -5415,7 +5462,7 @@ def pool_bucket(item):
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
     is_priority_wechat = bool(item.get("is_priority_wechat"))
 
-    if date_ok and reliable_source and (practical_hit or frontier_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2)):
+    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit):
         return "A"
     if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
@@ -6455,6 +6502,50 @@ def generate_html(items, date_str):
     )
 
 
+def select_audio_special_items(items, limit=None):
+    limit = limit or max(FEISHU_AUDIO_TOP_N * 4, 12)
+    candidates = []
+    for item in items:
+        if not is_audio_special_item(item):
+            continue
+        if not audio_editorial_core_hit(item):
+            continue
+        if audio_editorial_excluded(item):
+            continue
+        if item.get("source") == WECHAT_SOURCE_NAME:
+            if not (wechat_keyword_gate(item) or audio_editorial_priority(item)):
+                continue
+        score = float(item.get("heat_score", 0) or 0)
+        score += audio_relevance_score(item) * 12
+        if audio_editorial_priority(item):
+            score += 40
+        if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
+            score += 12
+        if item.get("is_priority_wechat"):
+            score += 8
+        candidates.append((score, item))
+
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    selected = []
+    seen_urls = set()
+    seen_titles = []
+    for _, item in candidates:
+        url = str(item.get("url", "") or "").rstrip("/")
+        title = str(item.get("title", "") or "").strip()
+        if url and url in seen_urls:
+            continue
+        if title and is_duplicate_title(title, seen_titles, threshold=0.62):
+            continue
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.append(title)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def build_review_feedback_records(all_review_items, selected_items):
     selected_urls = {str(it.get("url", "") or "").rstrip("/") for it in selected_items}
     rows = []
@@ -6844,7 +6935,7 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
-    audio_special_pool = deduplicate_and_rank([dict(it) for it in all_items if is_audio_special_item(it)])
+    audio_special_pool = select_audio_special_items([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
