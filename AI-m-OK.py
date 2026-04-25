@@ -6578,10 +6578,9 @@ def build_review_feedback_records(all_review_items, selected_items):
 def build_feishu_card(items, date_str, audio_source_items=None):
     feishu_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)[:FEISHU_TOP_N]
     audio_source_items = audio_source_items if audio_source_items is not None else items
-    audio_candidates = sorted(
-        [it for it in audio_source_items if is_audio_special_item(it)],
-        key=lambda x: x.get("heat_score", 0),
-        reverse=True,
+    audio_candidates = select_audio_special_items(
+        audio_source_items,
+        limit=max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N),
     )
 
     total_count = len(items)
@@ -6602,8 +6601,10 @@ def build_feishu_card(items, date_str, audio_source_items=None):
         if not audio_items:
             audio_items = [it for it in feishu_items if is_audio_special_item(it)][: min(3, FEISHU_AUDIO_TOP_N)]
 
-    intl_items = [it for it in feishu_items if it.get("source_type") != "domestic"]
-    domestic_items = [it for it in feishu_items if it.get("source_type") == "domestic"]
+    audio_urls = {str(it.get("url", "")).rstrip("/") for it in audio_items if it.get("url")}
+    base_feishu_items = [it for it in feishu_items if str(it.get("url", "")).rstrip("/") not in audio_urls]
+    intl_items = [it for it in base_feishu_items if it.get("source_type") != "domestic"]
+    domestic_items = [it for it in base_feishu_items if it.get("source_type") == "domestic"]
 
     elements = []
 
@@ -6667,8 +6668,12 @@ def build_feishu_card(items, date_str, audio_source_items=None):
         elements.append({"tag": "hr"})
         elements.append({
             "tag": "markdown",
-            "content": "<font color='orange'>**🎧 AI音频**</font>",
+            "content": f"<font color='orange'>**🎧 AI音频专区**</font>",
             "text_size": "heading",
+        })
+        elements.append({
+            "tag": "markdown",
+            "content": f"<font color='grey'>本区收录 {len(audio_items)} 条 AI音频相关精选</font>",
         })
         elements.append({"tag": "hr"})
         audio_groups = {}
