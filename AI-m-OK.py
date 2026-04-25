@@ -1032,6 +1032,11 @@ def _normalize_history_entries(raw_data):
                 continue
             if "::" in s:
                 normalized.add(s)
+                if s.startswith("title::"):
+                    title_text = s.split("::", 1)[1].strip()
+                    inferred_event_fp = extract_event_fingerprint({"title": title_text})
+                    if inferred_event_fp:
+                        normalized.add(f"event::{inferred_event_fp}")
             else:
                 url = canonicalize_url_for_history(s)
                 if url:
@@ -5493,6 +5498,62 @@ def extract_event_fingerprint(item):
     return "|".join(parts[:8])
 
 
+def extract_event_root(item):
+    event_fp = extract_event_fingerprint(item)
+    if not event_fp:
+        return ""
+    return event_fp.split("|", 1)[0].strip()
+
+
+def _score_for_dedup(item):
+    return float(item.get("heat_score", 0) or 0) + float(item.get("_completeness", 0) or 0) / 100.0
+
+
+def _is_release_model_story(item):
+    text = normalize_title_key(item.get("title_zh") or item.get("title") or "")
+    return bool(
+        re.search(r"发布|推出|preview|previews|launch|release|new model|新模型", text, re.IGNORECASE)
+        and re.search(r"模型|model|大模型|llm", text, re.IGNORECASE)
+    )
+
+
+def _item_day_key(item):
+    raw = str(item.get("date", "") or "").strip()
+    return raw[:10] if raw else ""
+
+
+def is_same_similar_story(candidate, existing):
+    candidate_root = extract_event_root(candidate)
+    existing_root = extract_event_root(existing)
+    if not candidate_root or candidate_root != existing_root:
+        return False
+    candidate_fp = extract_event_fingerprint(candidate)
+    existing_fp = extract_event_fingerprint(existing)
+    t1 = candidate.get("title_zh") or candidate.get("title") or ""
+    t2 = existing.get("title_zh") or existing.get("title") or ""
+    if title_similarity(t1, t2) >= 0.46:
+        return True
+    candidate_tail = candidate_fp.split("|")[1:] if candidate_fp else []
+    existing_tail = existing_fp.split("|")[1:] if existing_fp else []
+    if (
+        _item_day_key(candidate)
+        and _item_day_key(candidate) == _item_day_key(existing)
+        and candidate_tail
+        and existing_tail
+        and any(x == "model" for x in candidate_tail + existing_tail)
+        and any(re.match(r"v\d", x, re.IGNORECASE) for x in candidate_tail + existing_tail)
+    ):
+        return True
+    if (
+        _is_release_model_story(candidate)
+        and _is_release_model_story(existing)
+        and _item_day_key(candidate)
+        and _item_day_key(candidate) == _item_day_key(existing)
+    ):
+        return True
+    return False
+
+
 def practical_relevance_score(item):
     title = item.get("title", "")
     summary = item.get("summary", "")
@@ -5920,12 +5981,26 @@ def deduplicate_and_rank(all_items):
         if is_duplicate_title(title, seen_titles):
             continue
 
+        similar_prev = None
+        for prev in deduped:
+            if is_same_similar_story(item, prev):
+                similar_prev = prev
+                break
+        if similar_prev is not None:
+            if _score_for_dedup(item) > _score_for_dedup(similar_prev):
+                try:
+                    deduped.remove(similar_prev)
+                except ValueError:
+                    pass
+            else:
+                continue
+
         # 同事件跨来源只保留最优一条（热度+信息完整度）
         if fp:
             prev = seen_fingerprints.get(fp)
             if prev is not None:
-                old_score = prev.get("heat_score", 0) + prev.get("_completeness", 0) / 100.0
-                new_score = item.get("heat_score", 0) + item.get("_completeness", 0) / 100.0
+                old_score = _score_for_dedup(prev)
+                new_score = _score_for_dedup(item)
                 if new_score > old_score:
                     try:
                         deduped.remove(prev)
@@ -5940,8 +6015,8 @@ def deduplicate_and_rank(all_items):
         if event_fp:
             prev = seen_event_fingerprints.get(event_fp)
             if prev is not None:
-                old_score = prev.get("heat_score", 0) + prev.get("_completeness", 0) / 100.0
-                new_score = item.get("heat_score", 0) + item.get("_completeness", 0) / 100.0
+                old_score = _score_for_dedup(prev)
+                new_score = _score_for_dedup(item)
                 if new_score > old_score:
                     try:
                         deduped.remove(prev)
@@ -6704,6 +6779,48 @@ def select_audio_special_items(items, limit=None):
     return selected
 
 
+def is_item_link_accessible(item):
+    url = str(item.get("url", "") or "").strip()
+    if not url:
+        return False
+    if "mp.weixin.qq.com/" not in url:
+        return True
+    try:
+        session = requests.Session()
+        session.trust_env = False
+        resp = session.get(
+            url,
+            timeout=12,
+            allow_redirects=True,
+            headers={"User-Agent": DEFAULT_HEADERS["User-Agent"]},
+        )
+        if resp.status_code >= 400:
+            return False
+        body = (resp.text or "")[:4000]
+        if re.search(
+            r"内容已被发布者删除|此内容因违规无法查看|该公众号已迁移|链接无法访问|内容已删除|此内容已不可见",
+            body,
+            re.IGNORECASE,
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def filter_inaccessible_items(items):
+    kept = []
+    filtered_count = 0
+    for item in items:
+        if not is_item_link_accessible(item):
+            filtered_count += 1
+            continue
+        kept.append(item)
+    if filtered_count:
+        print(f"      [v3.7] 链接不可访问过滤: {filtered_count} 条")
+    return kept
+
+
 def build_review_feedback_records(all_review_items, selected_items):
     selected_urls = {str(it.get("url", "") or "").rstrip("/") for it in selected_items}
     rows = []
@@ -7112,6 +7229,8 @@ def main():
 
     print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
     final = generate_chinese_summaries(final)
+    final = filter_inaccessible_items(final)
+    audio_special_pool = select_audio_special_items([dict(it) for it in final])
     audio_review_urls = {
         str(item.get("url", "")).rstrip("/")
         for item in audio_special_pool
