@@ -557,6 +557,16 @@ ENTERPRISE_BIZ_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+BUSINESS_FINANCE_FILTER = re.compile(
+    r"财经|注资|募资|投融资|融资额|领投|跟投|战投|投资人|投资机构|财务顾问"
+    r"|资本市场|一级市场|二级市场|商业观察|商业评论|商业周刊|商业版图"
+    r"|估值|IPO|上市|收购|并购|股权|资本|风投|创投|基金|财报|营收|利润|亏损|市值|股价|交易"
+    r"|天使轮|种子轮|pre-A|A轮|B轮|C轮|D轮|E轮"
+    r"|funding|raised|raises|investment|investor|investors|valuation|ipo|earnings|revenue|profit"
+    r"|stock|stocks|shares|market cap|venture capital|\bVC\b|\bPE\b|series\s*[A-Z]",
+    re.IGNORECASE,
+)
+
 PRACTICE_BOOST = re.compile(
     r"tutorial|how.to|实战|教程|部署|fine.?tun|微调|训练|推理|inference"
     r"|benchmark|评测|对比|测评|实测|体验|上手|接入|集成|API"
@@ -3722,6 +3732,17 @@ def audio_editorial_excluded(item):
     ))
 
 
+def is_business_finance_noise(item):
+    text = build_item_filter_text(item, include_query=False)
+    url = str(item.get("url", "") or "")
+    return bool(
+        FUNDING_POLICY_FILTER.search(text)
+        or ENTERPRISE_BIZ_FILTER.search(text)
+        or BUSINESS_FINANCE_FILTER.search(text)
+        or INVESTMENT_URL_FILTER.search(url)
+    )
+
+
 def audio_editorial_core_hit(item):
     text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
     return bool(re.search(
@@ -3738,6 +3759,8 @@ def audio_editorial_priority(item):
     if not is_audio_special_item(item):
         return False
     if not audio_editorial_core_hit(item):
+        return False
+    if is_business_finance_noise(item):
         return False
     if audio_editorial_excluded(item):
         return False
@@ -5532,9 +5555,8 @@ def quality_filter(items):
     filtered = []
     pool_stats = {"A": 0, "B": 0}
     today = datetime.now(BEIJING_TZ)
-    funding_policy_count = 0
+    business_finance_filtered_count = 0
     non_tech_filtered_count = 0
-    enterprise_biz_filtered_count = 0
     practical_filtered_count = 0
     hard_practical_filtered_count = 0
     # 日期无法解析/超过时效统计
@@ -5623,20 +5645,12 @@ def quality_filter(items):
             date_missing_filtered_count += 1
             continue
 
-        if FUNDING_POLICY_FILTER.search(text):
-            # 投资/商业类直接过滤
-            funding_policy_count += 1
-            continue
-        if INVESTMENT_URL_FILTER.search(url):
-            funding_policy_count += 1
+        if is_business_finance_noise(item):
+            business_finance_filtered_count += 1
             continue
 
         if NON_TECH_FILTER.search(text) and not AI_EXEMPT.search(text):
             non_tech_filtered_count += 1
-            continue
-
-        if ENTERPRISE_BIZ_FILTER.search(text):
-            enterprise_biz_filtered_count += 1
             continue
 
         # 🚀 严格拦截：只要匹配到产品特征，或者被智能识别为产品首页，直接丢弃！
@@ -5671,8 +5685,8 @@ def quality_filter(items):
 
     if non_tech_filtered_count > 0:
         print(f"      [v2.6] 非技术向内容过滤: {non_tech_filtered_count} 条")
-    if enterprise_biz_filtered_count > 0:
-        print(f"      [v2.7] 企业商务类新闻过滤: {enterprise_biz_filtered_count} 条")
+    if business_finance_filtered_count > 0:
+        print(f"      [v3.5] 商业/财经/融资类过滤: {business_finance_filtered_count} 条")
     if practical_filtered_count > 0:
         print(f"      [v3.3] 实用/复用/创新不足过滤: {practical_filtered_count} 条")
     if hard_practical_filtered_count > 0:
@@ -6386,21 +6400,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="logo">\U0001f955</div>
             <h1>AI'm OK-{date}</h1>
             <div class="subtitle">每日AI行业资讯精选 | 国内外多源聚合 | 用最少的时间掌握最新动态</div>
-            <div class="stats">
-                <span class="stat">{count} 条精选</span>
-                <span class="stat">🌐 {intl_count} 条国际</span>
-                <span class="stat">🏮 {domestic_count} 条国内</span>
-                <span class="stat">✨ {special_count} 条AI专项</span>
-                <span class="stat">🎧 {audio_count} 条AI音频</span>
-                <span class="stat">{source_count} 个来源</span>
-            </div>
+        <div class="stats">
+            <span class="stat">{count} 条精选</span>
+            <span class="stat">🌐 {intl_count} 条国际</span>
+            <span class="stat">🏮 {domestic_count} 条国内</span>
+            <span class="stat">🎧 {audio_count} 条AI音频</span>
+            <span class="stat">{source_count} 个来源</span>
         </div>
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
-            <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
-            <button class="tab-btn special" onclick="switchTab('special', this)">✨AI专项<span class="tab-count">{special_count}</span></button>
-            <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
-        </div>
+    </div>
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
+        <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
+        <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
+    </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
 {intl_cards}
@@ -6411,15 +6423,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 {domestic_cards}
             </div>
         </div>
-        <div id="tab-special" class="tab-content">
-            <div class="cards-grid">
-{special_cards}
-            </div>
-        </div>
-        <div id="tab-audio" class="tab-content">
-            <div class="cards-grid">
+    <div id="tab-audio" class="tab-content">
+        <div class="cards-grid">
 {audio_cards}
-            </div>
+        </div>
         </div>
         <div class="footer">
             \U0001f955 由 AI'm OK v3.2 自动生成 | {date} | 国内外 {source_count} 源聚合
@@ -6472,53 +6479,43 @@ def _build_card_html(item):
     )
 
 def generate_html(items, date_str):
-    intl_items = [it for it in items if it.get("source_type") != "domestic"]
-    domestic_items = [it for it in items if it.get("source_type") == "domestic"]
     audio_special_items = select_audio_special_items(
         items,
-        limit=max(FEISHU_AUDIO_TOP_N * 6, 24),
+        limit=max(len(items), max(FEISHU_AUDIO_TOP_N * 8, 24)),
     )
     audio_urls = {
         str(it.get("url", "") or "").rstrip("/")
         for it in audio_special_items
         if it.get("url")
     }
-    special_items = []
-    seen_special = set()
-    ranked_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)
-    for it in ranked_items:
-        if not is_ai_special_tab_item(it):
-            continue
-        url = str(it.get("url", "") or "").rstrip("/")
-        if url and url in audio_urls:
-            continue
-        if url and url in seen_special:
-            continue
-        if url:
-            seen_special.add(url)
-        special_items.append(it)
+    intl_items = [
+        it for it in items
+        if it.get("source_type") != "domestic"
+        and str(it.get("url", "") or "").rstrip("/") not in audio_urls
+    ]
+    domestic_items = [
+        it for it in items
+        if it.get("source_type") == "domestic"
+        and str(it.get("url", "") or "").rstrip("/") not in audio_urls
+    ]
 
     intl_count = len(intl_items)
     domestic_count = len(domestic_items)
-    special_count = len(special_items)
     audio_count = len(audio_special_items)
     source_count = len(set(it["source"] for it in items))
 
     intl_cards = "\n".join(_build_card_html(item) for item in intl_items)
     domestic_cards = "\n".join(_build_card_html(item) for item in domestic_items)
-    special_cards = "\n".join(_build_card_html(item) for item in special_items)
     audio_cards = "\n".join(_build_card_html(item) for item in audio_special_items)
 
     return HTML_TEMPLATE.format(
         date=date_str,
         intl_cards=intl_cards,
         domestic_cards=domestic_cards,
-        special_cards=special_cards,
         audio_cards=audio_cards,
         count=len(items),
         intl_count=intl_count,
         domestic_count=domestic_count,
-        special_count=special_count,
         audio_count=audio_count,
         source_count=source_count,
     )
@@ -6528,6 +6525,8 @@ def select_audio_special_items(items, limit=None):
     limit = limit or max(FEISHU_AUDIO_TOP_N * 4, 12)
     candidates = []
     for item in items:
+        if is_business_finance_noise(item):
+            continue
         if not is_audio_special_item(item):
             continue
         if not audio_editorial_core_hit(item):
@@ -6947,8 +6946,8 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
-    audio_special_pool = select_audio_special_items([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
+    audio_special_pool = select_audio_special_items([dict(it) for it in final])
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
 
