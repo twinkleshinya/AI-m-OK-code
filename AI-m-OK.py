@@ -6962,6 +6962,11 @@ def main():
     for item in audio_special_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
         url = str(item.get("url", "")).rstrip("/")
         audio_source_items.append(final_by_url.get(url, item))
+    audio_review_urls = {
+        str(item.get("url", "")).rstrip("/")
+        for item in audio_special_pool
+        if item.get("url")
+    }
     review_candidates = [dict(item) for item in final]
 
      # ══════════════════════════════════════════════════════════════
@@ -6975,6 +6980,7 @@ def main():
             pick_emoji_func=pick_emoji,
             get_source_info_func=get_source_info,
             port=18088,
+            audio_item_urls=audio_review_urls,
         )
         if not final:
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")

@@ -1,9 +1,10 @@
 """
-review_server.py - AI'm OK 本地审核页
-支持：
-1. 勾选保留/移除
-2. 为每条内容打反馈标签
-3. 将审核结果与反馈标签一并返回主脚本
+Local review server for AI'm OK.
+
+Supports:
+1. selecting/deselecting items before push
+2. tagging review feedback per item
+3. splitting audio items into a dedicated review section
 """
 
 import json
@@ -53,19 +54,9 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             border-bottom: 1px solid rgba(240,246,252,0.08);
             backdrop-filter: blur(10px);
         }}
-        .title {{
-            font-size: 20px;
-            font-weight: 800;
-        }}
-        .meta {{
-            font-size: 13px;
-            color: #8b949e;
-        }}
-        .toolbar-actions {{
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }}
+        .title {{ font-size: 20px; font-weight: 800; }}
+        .meta {{ font-size: 13px; color: #8b949e; }}
+        .toolbar-actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
         button {{
             border: none;
             border-radius: 999px;
@@ -74,29 +65,11 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             font-size: 14px;
             font-weight: 700;
         }}
-        .btn-lite {{
-            background: #21262d;
-            color: #e6edf3;
-        }}
-        .btn-primary {{
-            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-            color: #fff;
-        }}
-        .btn-danger {{
-            background: #3d1d1d;
-            color: #ffb4b4;
-        }}
-        .container {{
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 18px;
-        }}
-        .filter-bar {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 16px;
-        }}
+        .btn-lite {{ background: #21262d; color: #e6edf3; }}
+        .btn-primary {{ background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; }}
+        .btn-danger {{ background: #3d1d1d; color: #ffb4b4; }}
+        .container {{ max-width: 1180px; margin: 0 auto; padding: 18px; }}
+        .filter-bar {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }}
         .filter-chip {{
             padding: 6px 14px;
             border-radius: 999px;
@@ -107,22 +80,9 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             cursor: pointer;
             border: 1px solid rgba(240,246,252,0.08);
         }}
-        .filter-chip.active {{
-            color: #fff;
-            background: #22304a;
-            border-color: #3b82f6;
-        }}
-        .section-title {{
-            margin: 20px 0 10px;
-            font-size: 15px;
-            color: #9da7b3;
-            font-weight: 800;
-        }}
-        .cards-grid {{
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 16px;
-        }}
+        .filter-chip.active {{ color: #fff; background: #22304a; border-color: #3b82f6; }}
+        .section-title {{ margin: 20px 0 10px; font-size: 15px; color: #9da7b3; font-weight: 800; }}
+        .cards-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
         @media (max-width: 760px) {{
             .cards-grid {{ grid-template-columns: 1fr; }}
         }}
@@ -133,108 +93,25 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             padding: 18px;
             transition: 0.2s ease;
         }}
-        .card.selected {{
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 1px rgba(59,130,246,0.25);
-        }}
-        .card.removed {{
-            opacity: 0.42;
-        }}
-        .card-top {{
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 8px;
-        }}
-        .rank {{
-            font-size: 12px;
-            color: #8b949e;
-            font-weight: 700;
-        }}
-        .pool-badge {{
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-weight: 800;
-        }}
-        .pool-A {{
-            background: rgba(34,197,94,0.16);
-            color: #7ee787;
-        }}
-        .pool-B {{
-            background: rgba(250,204,21,0.16);
-            color: #facc15;
-        }}
-        .pool-DROP {{
-            background: rgba(248,113,113,0.16);
-            color: #fda4af;
-        }}
-        .tags {{
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-bottom: 10px;
-        }}
-        .tag {{
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            background: #21262d;
-            color: #c9d1d9;
-        }}
-        .title-line {{
-            font-size: 16px;
-            font-weight: 800;
-            line-height: 1.55;
-            margin-bottom: 8px;
-        }}
-        .summary {{
-            color: #9da7b3;
-            font-size: 13px;
-            line-height: 1.7;
-            margin-bottom: 12px;
-        }}
-        .scores {{
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
-            color: #8b949e;
-            font-size: 12px;
-        }}
-        .actions {{
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
-        }}
-        .toggle-btn {{
-            background: #22304a;
-            color: #dbeafe;
-        }}
-        .toggle-btn.off {{
-            background: #2a1a1a;
-            color: #fecaca;
-        }}
-        .link {{
-            display: inline-flex;
-            align-items: center;
-            color: #7cc0ff;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 700;
-        }}
-        .feedback-title {{
-            font-size: 12px;
-            color: #8b949e;
-            margin-bottom: 8px;
-            font-weight: 800;
-        }}
-        .feedback-group {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }}
+        .card.selected {{ border-color: #3b82f6; box-shadow: 0 0 0 1px rgba(59,130,246,0.25); }}
+        .card.removed {{ opacity: 0.42; }}
+        .card-top {{ display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }}
+        .rank {{ font-size: 12px; color: #8b949e; font-weight: 700; }}
+        .pool-badge {{ font-size: 11px; padding: 4px 10px; border-radius: 999px; font-weight: 800; }}
+        .pool-A {{ background: rgba(34,197,94,0.16); color: #7ee787; }}
+        .pool-B {{ background: rgba(250,204,21,0.16); color: #facc15; }}
+        .pool-DROP {{ background: rgba(248,113,113,0.16); color: #fda4af; }}
+        .tags {{ display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }}
+        .tag {{ font-size: 11px; padding: 4px 10px; border-radius: 999px; background: #21262d; color: #c9d1d9; }}
+        .title-line {{ font-size: 16px; font-weight: 800; line-height: 1.55; margin-bottom: 8px; }}
+        .summary {{ color: #9da7b3; font-size: 13px; line-height: 1.7; margin-bottom: 12px; }}
+        .scores {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; color: #8b949e; font-size: 12px; }}
+        .actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }}
+        .toggle-btn {{ background: #22304a; color: #dbeafe; }}
+        .toggle-btn.off {{ background: #2a1a1a; color: #fecaca; }}
+        .link {{ display: inline-flex; align-items: center; color: #7cc0ff; text-decoration: none; font-size: 13px; font-weight: 700; }}
+        .feedback-title {{ font-size: 12px; color: #8b949e; margin-bottom: 8px; font-weight: 800; }}
+        .feedback-group {{ display: flex; flex-wrap: wrap; gap: 8px; }}
         .feedback-chip {{
             padding: 6px 12px;
             border-radius: 999px;
@@ -245,11 +122,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             border: 1px solid rgba(240,246,252,0.08);
             cursor: pointer;
         }}
-        .feedback-chip.active {{
-            background: #243247;
-            color: #fff;
-            border-color: #60a5fa;
-        }}
+        .feedback-chip.active {{ background: #243247; color: #fff; border-color: #60a5fa; }}
         .status-bar {{
             position: fixed;
             bottom: 0;
@@ -266,10 +139,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             color: #9da7b3;
             font-size: 13px;
         }}
-        .highlight {{
-            color: #fff;
-            font-weight: 800;
-        }}
+        .highlight {{ color: #fff; font-weight: 800; }}
         .overlay {{
             display: none;
             position: fixed;
@@ -282,9 +152,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             font-size: 20px;
             font-weight: 800;
         }}
-        .overlay.active {{
-            display: flex;
-        }}
+        .overlay.active {{ display: flex; }}
     </style>
 </head>
 <body>
@@ -306,6 +174,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             <span class="filter-chip active" onclick="filterBy('all', this)">全部</span>
             <span class="filter-chip" onclick="filterBy('intl', this)">国际</span>
             <span class="filter-chip" onclick="filterBy('domestic', this)">国内</span>
+            <span class="filter-chip" onclick="filterBy('audio', this)">AI音频</span>
             <span class="filter-chip" onclick="filterBy('A', this)">A池</span>
             <span class="filter-chip" onclick="filterBy('B', this)">B池</span>
             {filter_chips}
@@ -320,13 +189,18 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
         <div class="cards-grid" data-section="domestic">
 {domestic_cards}
         </div>
+
+        <div class="section-title" data-section="audio">AI音频（{audio_count}）</div>
+        <div class="cards-grid" data-section="audio">
+{audio_cards}
+        </div>
     </div>
 
     <div class="status-bar">
         <span>已选 <span class="highlight" id="bottomSelectedCount">{total}</span> / {total}</span>
         <span>A池 <span class="highlight" id="aCount">{a_count}</span></span>
         <span>B池 <span class="highlight" id="bCount">{b_count}</span></span>
-        <span>有标签 <span class="highlight" id="feedbackCount">0</span></span>
+        <span>已标注 <span class="highlight" id="feedbackCount">0</span></span>
     </div>
 
     <div class="overlay" id="overlay">正在提交审核结果...</div>
@@ -396,9 +270,11 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                 const sourceType = card.dataset.sourceType;
                 const category = card.dataset.category;
                 const pool = card.dataset.pool;
+                const isAudio = card.dataset.audio === '1';
                 let show = false;
                 if (type === 'all') show = true;
                 else if (type === 'intl' || type === 'domestic') show = sourceType === type;
+                else if (type === 'audio') show = isAudio;
                 else if (type === 'A' || type === 'B') show = pool === type;
                 else show = category === type;
                 card.style.display = show ? '' : 'none';
@@ -410,7 +286,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                 }}
                 const section = el.dataset.section;
                 if (!section) return;
-                if (type === 'intl' || type === 'domestic') {{
+                if (type === 'intl' || type === 'domestic' || type === 'audio') {{
                     el.style.display = section === type ? '' : 'none';
                 }} else {{
                     el.style.display = '';
@@ -517,6 +393,7 @@ REVIEW_CARD_TEMPLATE = """            <div class="card selected"
                  data-source-type="{source_type}"
                  data-category="{category}"
                  data-pool="{pool}"
+                 data-audio="{is_audio}"
                  data-selected="1"
                  data-feedback="">
                 <div class="card-top">
@@ -556,7 +433,7 @@ class ReviewResult:
 def _build_review_card(item, index, infer_tags_func, pick_emoji_func, get_source_info_func):
     tags = infer_tags_func(item)
     tags_html = "".join(
-        f'<span class="tag">{escape(label)}</span>' for label, css, emoji in tags
+        f'<span class="tag">{escape(label)}</span>' for label, _css, _emoji in tags
     )
     feedback_chips = "".join(
         f'<button type="button" class="feedback-chip" data-item-id="{index}" data-label="{escape(label, quote=True)}">{escape(label)}</button>'
@@ -564,13 +441,19 @@ def _build_review_card(item, index, infer_tags_func, pick_emoji_func, get_source
     )
     src_info = get_source_info_func(item["source"])
     pool = escape(str(item.get("_pool", "A")))
-    pool_label = "A池 高确定性" if pool == "A" else "B池 补量候选" if pool == "B" else "DROP"
+    if pool == "A":
+        pool_label = "A池 · 高确定性"
+    elif pool == "B":
+        pool_label = "B池 · 补充候选"
+    else:
+        pool_label = "DROP"
     return REVIEW_CARD_TEMPLATE.format(
         item_id=index,
         rank=index + 1,
         source_type=src_info["type"],
         category=escape(item.get("category", "AI")),
         pool=pool,
+        is_audio="1" if item.get("_is_audio_section") else "0",
         pool_label=pool_label,
         emoji=pick_emoji_func(item),
         tags_html=tags_html,
@@ -586,9 +469,27 @@ def _build_review_card(item, index, infer_tags_func, pick_emoji_func, get_source
     )
 
 
-def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_func):
-    intl_items = [(i, it) for i, it in enumerate(items) if it.get("source_type") != "domestic"]
-    domestic_items = [(i, it) for i, it in enumerate(items) if it.get("source_type") == "domestic"]
+def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_func, audio_item_urls=None):
+    audio_item_urls = {str(u).rstrip("/") for u in (audio_item_urls or set()) if u}
+    prepared_items = []
+    for item in items:
+        cloned = dict(item)
+        url = str(cloned.get("url", "") or "").rstrip("/")
+        cloned["_is_audio_section"] = bool(url and url in audio_item_urls)
+        prepared_items.append(cloned)
+
+    intl_items = [
+        (i, it) for i, it in enumerate(prepared_items)
+        if it.get("source_type") != "domestic" and not it.get("_is_audio_section")
+    ]
+    domestic_items = [
+        (i, it) for i, it in enumerate(prepared_items)
+        if it.get("source_type") == "domestic" and not it.get("_is_audio_section")
+    ]
+    audio_items = [
+        (i, it) for i, it in enumerate(prepared_items)
+        if it.get("_is_audio_section")
+    ]
 
     intl_cards = "\n".join(
         _build_review_card(it, i, infer_tags_func, pick_emoji_func, get_source_info_func)
@@ -598,20 +499,26 @@ def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_
         _build_review_card(it, i, infer_tags_func, pick_emoji_func, get_source_info_func)
         for i, it in domestic_items
     )
+    audio_cards = "\n".join(
+        _build_review_card(it, i, infer_tags_func, pick_emoji_func, get_source_info_func)
+        for i, it in audio_items
+    )
 
-    categories = sorted({str(it.get("category", "AI")) for it in items if it.get("category")})
+    categories = sorted({str(it.get("category", "AI")) for it in prepared_items if it.get("category")})
     filter_chips = "".join(
         f'<span class="filter-chip" onclick="filterBy({json.dumps(cat, ensure_ascii=False)}, this)">{escape(cat)}</span>'
         for cat in categories
     )
-    a_count = sum(1 for it in items if it.get("_pool") == "A")
-    b_count = sum(1 for it in items if it.get("_pool") == "B")
+    a_count = sum(1 for it in prepared_items if it.get("_pool") == "A")
+    b_count = sum(1 for it in prepared_items if it.get("_pool") == "B")
     return REVIEW_PAGE_TEMPLATE.format(
-        total=len(items),
+        total=len(prepared_items),
         intl_count=len(intl_items),
         domestic_count=len(domestic_items),
+        audio_count=len(audio_items),
         intl_cards=intl_cards,
         domestic_cards=domestic_cards,
+        audio_cards=audio_cards,
         filter_chips=filter_chips,
         a_count=a_count,
         b_count=b_count,
@@ -619,12 +526,18 @@ def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_
     )
 
 
-def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info_func, port=18088):
+def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info_func, port=18088, audio_item_urls=None):
     review_result = ReviewResult()
-    page_html = _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_func)
+    page_html = _build_review_page(
+        items,
+        infer_tags_func,
+        pick_emoji_func,
+        get_source_info_func,
+        audio_item_urls=audio_item_urls,
+    )
 
     class ReviewHandler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):
+        def log_message(self, fmt, *args):
             pass
 
         def do_GET(self):
@@ -676,11 +589,11 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps(response, ensure_ascii=False).encode("utf-8"))
-            except Exception as e:
+            except Exception as exc:
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
 
         def _shutdown_server(self):
             time.sleep(1)
@@ -691,12 +604,12 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
     server_thread.start()
 
     url = f"http://127.0.0.1:{port}/"
-    print(f"\n  {'='*56}")
-    print(f"  │  🌐 审核页面已启动: {url}")
-    print(f"  │  📋 共 {len(items)} 条待审核")
-    print(f"  │  🏷️  现已支持反馈标签：有用 / 一般 / 无关 / 太偏技术 / 太偏商业 / 适合音频部")
-    print(f"  │  ⌨️  快捷键: Ctrl+A 全选 | Ctrl+I 反选 | Ctrl+Enter 提交")
-    print(f"  {'='*56}\n")
+    print(f"\n  {'=' * 56}")
+    print(f"  审核页已启动: {url}")
+    print(f"  共 {len(items)} 条待审核")
+    print("  现已支持反馈标签：有用 / 一般 / 无关 / 太偏技术 / 太偏商业 / 适合音频部")
+    print("  快捷键：Ctrl+A 全选 | Ctrl+I 反选 | Ctrl+Enter 提交")
+    print(f"  {'=' * 56}\n")
 
     webbrowser.open(url)
     review_result.completed.wait()
@@ -707,7 +620,7 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
         pass
 
     if review_result.selected_ids is None or len(review_result.selected_ids) == 0:
-        print("  ❌ 未选择任何条目，本次不推送。")
+        print("  未选择任何条目，本次不推送。")
         return []
 
     feedback_map = {}
@@ -722,5 +635,5 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
             row = feedback_map.get(i, {})
             item["_review_feedback_labels"] = row.get("labels", [])
             selected_items.append(item)
-    print(f"  ✅ 审核完成！用户选择了 {len(selected_items)}/{len(items)} 条")
+    print(f"  审核完成！用户选择了 {len(selected_items)}/{len(items)} 条")
     return selected_items
