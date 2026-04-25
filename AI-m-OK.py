@@ -6391,6 +6391,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <span class="stat">🌐 {intl_count} 条国际</span>
                 <span class="stat">🏮 {domestic_count} 条国内</span>
                 <span class="stat">✨ {special_count} 条AI专项</span>
+                <span class="stat">🎧 {audio_count} 条AI音频</span>
                 <span class="stat">{source_count} 个来源</span>
             </div>
         </div>
@@ -6398,6 +6399,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
             <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
             <button class="tab-btn special" onclick="switchTab('special', this)">✨AI专项<span class="tab-count">{special_count}</span></button>
+            <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
         </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
@@ -6412,6 +6414,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="tab-special" class="tab-content">
             <div class="cards-grid">
 {special_cards}
+            </div>
+        </div>
+        <div id="tab-audio" class="tab-content">
+            <div class="cards-grid">
+{audio_cards}
             </div>
         </div>
         <div class="footer">
@@ -6467,6 +6474,15 @@ def _build_card_html(item):
 def generate_html(items, date_str):
     intl_items = [it for it in items if it.get("source_type") != "domestic"]
     domestic_items = [it for it in items if it.get("source_type") == "domestic"]
+    audio_special_items = select_audio_special_items(
+        items,
+        limit=max(FEISHU_AUDIO_TOP_N * 6, 24),
+    )
+    audio_urls = {
+        str(it.get("url", "") or "").rstrip("/")
+        for it in audio_special_items
+        if it.get("url")
+    }
     special_items = []
     seen_special = set()
     ranked_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)
@@ -6474,6 +6490,8 @@ def generate_html(items, date_str):
         if not is_ai_special_tab_item(it):
             continue
         url = str(it.get("url", "") or "").rstrip("/")
+        if url and url in audio_urls:
+            continue
         if url and url in seen_special:
             continue
         if url:
@@ -6483,21 +6501,25 @@ def generate_html(items, date_str):
     intl_count = len(intl_items)
     domestic_count = len(domestic_items)
     special_count = len(special_items)
+    audio_count = len(audio_special_items)
     source_count = len(set(it["source"] for it in items))
 
     intl_cards = "\n".join(_build_card_html(item) for item in intl_items)
     domestic_cards = "\n".join(_build_card_html(item) for item in domestic_items)
     special_cards = "\n".join(_build_card_html(item) for item in special_items)
+    audio_cards = "\n".join(_build_card_html(item) for item in audio_special_items)
 
     return HTML_TEMPLATE.format(
         date=date_str,
         intl_cards=intl_cards,
         domestic_cards=domestic_cards,
         special_cards=special_cards,
+        audio_cards=audio_cards,
         count=len(items),
         intl_count=intl_count,
         domestic_count=domestic_count,
         special_count=special_count,
+        audio_count=audio_count,
         source_count=source_count,
     )
 
@@ -6671,23 +6693,8 @@ def build_feishu_card(items, date_str, audio_source_items=None):
             "content": f"<font color='orange'>**🎧 AI音频专区**</font>",
             "text_size": "heading",
         })
-        elements.append({
-            "tag": "markdown",
-            "content": f"<font color='grey'>本区收录 {len(audio_items)} 条 AI音频相关精选</font>",
-        })
         elements.append({"tag": "hr"})
-        audio_groups = {}
-        for item in audio_items:
-            label = classify_audio_topic(item)
-            audio_groups.setdefault(label, []).append(item)
-        for idx, (label, group_items) in enumerate(audio_groups.items()):
-            if idx > 0:
-                elements.append({"tag": "hr"})
-            elements.append({
-                "tag": "markdown",
-                "content": f"<font color='grey'>分类：{label}</font>",
-            })
-            _append_news_items(group_items)
+        _append_news_items(audio_items)
 
     elements.append({"tag": "hr"})
 
