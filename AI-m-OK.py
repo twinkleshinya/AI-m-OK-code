@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import sqlite3
 import subprocess
 import time
 import shutil
@@ -315,7 +316,7 @@ WERSS_PASSWORD = os.environ.get(
     os.environ.get("WE_MP_RSS_PASSWORD", WERSS_LOCAL_ENV.get("WERSS_PASSWORD", WERSS_LOCAL_ENV.get("PASSWORD", ""))),
 ).strip()
 WERSS_TOKEN = os.environ.get("WERSS_TOKEN", os.environ.get("WE_MP_RSS_TOKEN", "")).strip()
-WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "120"))
+WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "0"))
 WERSS_AUTO_SUBSCRIBE = os.environ.get("WERSS_AUTO_SUBSCRIBE", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_AUTOSUBSCRIBE_LIMIT = int(os.environ.get("WERSS_AUTOSUBSCRIBE_LIMIT", str(len(WECHAT_OFFICIAL_ACCOUNTS))))
 WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
@@ -327,6 +328,7 @@ WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").str
 WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
+WERSS_SQLITE_PATH = os.environ.get("WERSS_SQLITE_PATH", "").strip()
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
 
@@ -2609,6 +2611,7 @@ def _build_werss_item(source_name, row, query="WeRSS"):
 
 
 def _fetch_werss_api_articles(base, source_name, max_items=40):
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
     token = _werss_login(base)
     paths = [
         "/api/v1/wx/articles",
@@ -2631,7 +2634,7 @@ def _fetch_werss_api_articles(base, source_name, max_items=40):
                     continue
                 seen.add(url)
                 items.append(item)
-                if len(items) >= max_items:
+                if max_items and len(items) >= max_items:
                     return items
             if items:
                 return items
@@ -2653,6 +2656,7 @@ def _extract_werss_feed_urls(data, base):
 
 
 def _fetch_werss_feed_articles(base, source_name, max_items=40):
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
     urls = [
         f"{base.rstrip()}/feeds/all.atom",
         f"{base.rstrip()}/feeds/all.rss",
@@ -2669,7 +2673,7 @@ def _fetch_werss_feed_articles(base, source_name, max_items=40):
     items = []
     seen = set()
     for feed_url in urls:
-        part = parse_rss_feed(feed_url, source_name=source_name, max_entries=max_items, ai_filter=False)
+        part = parse_rss_feed(feed_url, source_name=source_name, max_entries=max_items or 200, ai_filter=False)
         for it in part:
             url = it.get("url", "").rstrip("/")
             if "mp.weixin.qq.com" not in url or url in seen:
@@ -2678,7 +2682,7 @@ def _fetch_werss_feed_articles(base, source_name, max_items=40):
             it["search_query"] = "WeRSS Feed"
             it["account_name"] = get_wechat_account_hint(it) or it.get("account_name", "")
             items.append(it)
-            if len(items) >= max_items:
+            if max_items and len(items) >= max_items:
                 return items
     return items
 
@@ -2737,6 +2741,122 @@ def _werss_feed_id_from_fakeid(fakeid):
         return f"MP_WXS_{decoded}"
     except Exception:
         return ""
+
+
+def _werss_row_feed_id(row):
+    if not isinstance(row, dict):
+        return ""
+    return str(
+        row.get("id")
+        or row.get("feed_id")
+        or row.get("mp_id")
+        or _werss_feed_id_from_fakeid(row.get("faker_id"))
+        or ""
+    ).strip()
+
+
+def _resolve_werss_sqlite_path():
+    candidates = []
+    explicit = WERSS_SQLITE_PATH or os.environ.get("WE_MP_RSS_SQLITE", "").strip()
+    if explicit:
+        candidates.append(Path(explicit))
+
+    db_url = str(
+        WERSS_LOCAL_ENV.get("DB")
+        or WERSS_LOCAL_ENV.get("WERSS_DB")
+        or ""
+    ).strip()
+    env_base = Path(WERSS_ENV_CANDIDATES[0]).parent if WERSS_ENV_CANDIDATES else Path.cwd()
+    if db_url.lower().startswith("sqlite:///"):
+        rel_path = db_url.split("sqlite:///", 1)[1].strip()
+        if rel_path:
+            candidates.append((env_base / rel_path).resolve())
+    candidates.extend([
+        env_base / "data" / "db.db",
+        Path(r"E:\jiangxy2\werss\data\db.db"),
+    ])
+
+    seen = set()
+    for path in candidates:
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except Exception:
+            resolved = Path(path)
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if resolved.exists():
+            return resolved
+    return None
+
+
+def _fetch_wechat_from_werss_sqlite(source_name, feed_ids=None, max_items=None):
+    db_path = _resolve_werss_sqlite_path()
+    if not db_path:
+        return []
+
+    max_items = None if max_items in (None, 0) else max(1, int(max_items))
+    min_publish_ts = int((datetime.now(BEIJING_TZ) - timedelta(days=max(7, WERSS_REFRESH_RECENT_DAYS))).timestamp())
+
+    clauses = [
+        "a.url like 'https://mp.weixin.qq.com/%'",
+        "coalesce(a.publish_time, 0) >= ?",
+    ]
+    params = [min_publish_ts]
+
+    clean_feed_ids = [str(x).strip() for x in (feed_ids or []) if str(x).strip()]
+    if clean_feed_ids:
+        placeholders = ",".join("?" for _ in clean_feed_ids)
+        clauses.append(f"a.mp_id in ({placeholders})")
+        params.extend(clean_feed_ids)
+
+    sql = f"""
+        select
+            a.mp_id,
+            a.title,
+            a.url,
+            a.description,
+            a.publish_time,
+            a.created_at,
+            a.updated_at,
+            f.mp_name
+        from articles a
+        left join feeds f on a.mp_id = f.id
+        where {' and '.join(clauses)}
+        order by coalesce(a.publish_time, 0) desc, a.created_at desc
+    """
+    if max_items:
+        sql += f" limit {max_items}"
+
+    items = []
+    seen = set()
+    try:
+        con = sqlite3.connect(str(db_path))
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        for row in cur.execute(sql, params).fetchall():
+            row = dict(row)
+            item = _build_werss_item(source_name, {
+                "article_url": row.get("url", ""),
+                "title": row.get("title", ""),
+                "digest": row.get("description", ""),
+                "mp_name": row.get("mp_name", ""),
+                "publish_time": row.get("publish_time") or row.get("updated_at") or row.get("created_at"),
+            }, query="WeRSS SQLite")
+            if not item:
+                continue
+            url = item.get("url", "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(item)
+            if max_items and len(items) >= max_items:
+                break
+        con.close()
+    except Exception:
+        return []
+    return items
 
 
 def _werss_subscribe_account(base, token, account):
@@ -2865,6 +2985,7 @@ def _refresh_werss_subscriptions(base, token):
         "skipped": max(0, len(rows) - len(target_rows)),
         "eligible": len(recent_rows),
         "all_recent": bool(WERSS_UPDATE_ALL_RECENT),
+        "target_feed_ids": [_werss_row_feed_id(row) for row in target_rows if _werss_row_feed_id(row)],
     }
     for row in target_rows:
         mp_id = str(row.get("id") or row.get("mp_id") or "").strip()
@@ -2895,6 +3016,7 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
     seen = set()
     for base in WERSS_BASES:
         token = _werss_login(base)
+        target_feed_ids = []
         if token:
             sub_stats = _ensure_werss_ai_subscriptions(base, token)
             if sub_stats["checked"]:
@@ -2909,8 +3031,22 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
                     f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
                     f"{refresh_mode}, 更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
                 )
+            target_feed_ids = update_stats.get("target_feed_ids") or []
         elif WERSS_AUTO_SUBSCRIBE:
             print("  [WARN] WeRSS 自动订阅跳过：后台登录失败，请检查 WERSS_USERNAME/WERSS_PASSWORD")
+        sqlite_items = _fetch_wechat_from_werss_sqlite(
+            source_name=source_name,
+            feed_ids=target_feed_ids,
+            max_items=max_items,
+        )
+        for it in sqlite_items:
+            url = it.get("url", "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(it)
+            if max_items and len(items) >= max_items:
+                return items
         api_items = _fetch_werss_api_articles(base, source_name=source_name, max_items=max_items)
         feed_items = _fetch_werss_feed_articles(base, source_name=source_name, max_items=max_items)
         for it in api_items + feed_items:
