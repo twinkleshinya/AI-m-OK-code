@@ -118,8 +118,8 @@ MAX_FUNDING_POLICY = 2
 PRODUCT_HEAT_THRESHOLD = 90
 FEISHU_TOP_N = 15
 FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
-MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "3"))
-REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "18"))
+MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "10"))
+REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -2417,11 +2417,36 @@ def is_known_deleted_url(item_or_url):
     return _url_has_token(url, KNOWN_DELETED_URL_TOKENS)
 
 
+def build_item_visible_text(item):
+    parts = [
+        item.get("title", ""),
+        item.get("summary", ""),
+        item.get("title_zh", ""),
+        item.get("summary_zh", ""),
+    ]
+    return " ".join(str(p) for p in parts if p)
+
+
+def is_visible_ai_audio_candidate(item):
+    if _url_has_token(str((item or {}).get("url", "") or ""), HIGH_VALUE_AUDIO_URL_TOKENS):
+        return True
+    text = build_item_visible_text(item)
+    return bool(re.search(
+        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音)"
+        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音).{0,12}AI"
+        r"|音乐生成|音频生成|语音模型|语音识别|语音合成|文本转语音|转写"
+        r"|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-Omni|Audio-Cogito|Audio-DeepThinker"
+        r"|ACE Studio|\bSuno\b|\bUdio\b|ElevenLabs|Step Audio|听觉大模型",
+        text,
+        re.IGNORECASE,
+    ))
+
+
 def is_high_value_audio_example(item):
     url = str((item or {}).get("url", "") or "")
     if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS):
         return True
-    text = build_item_filter_text(item, include_query=True)
+    text = build_item_visible_text(item)
     return bool(re.search(
         r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音)"
         r"|音频.{0,20}(AI|智能体|大模型).{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
@@ -6798,6 +6823,8 @@ def select_audio_review_candidates(items, limit=None):
         if is_practice_excluded_topic(item):
             continue
         if not is_audio_special_item(item):
+            continue
+        if not is_visible_ai_audio_candidate(item):
             continue
         if audio_editorial_excluded(item):
             continue
