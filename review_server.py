@@ -5,6 +5,7 @@ Supports:
 1. selecting/deselecting items before push
 2. tagging review feedback per item
 3. splitting audio items into a dedicated review section
+4. manual reordering before submission
 """
 
 import json
@@ -38,7 +39,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             background: #0d1117;
             color: #e6edf3;
             min-height: 100vh;
-            padding-bottom: 72px;
+            padding-bottom: 76px;
         }}
         .toolbar {{
             position: sticky;
@@ -109,6 +110,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
         .actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }}
         .toggle-btn {{ background: #22304a; color: #dbeafe; }}
         .toggle-btn.off {{ background: #2a1a1a; color: #fecaca; }}
+        .move-btn {{ background: #1f2937; color: #d1d5db; padding: 8px 12px; font-size: 13px; }}
         .link {{ display: inline-flex; align-items: center; color: #7cc0ff; text-decoration: none; font-size: 13px; font-weight: 700; }}
         .feedback-title {{ font-size: 12px; color: #8b949e; margin-bottom: 8px; font-weight: 800; }}
         .feedback-group {{ display: flex; flex-wrap: wrap; gap: 8px; }}
@@ -216,6 +218,13 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             return getCards().filter(card => card.style.display !== 'none');
         }}
 
+        function refreshRanks() {{
+            getCards().forEach((card, idx) => {{
+                const rankEl = card.querySelector('.rank');
+                if (rankEl) rankEl.textContent = `#${{idx + 1}}`;
+            }});
+        }}
+
         function setSelected(card, selected) {{
             card.dataset.selected = selected ? '1' : '0';
             card.classList.toggle('selected', selected);
@@ -230,6 +239,20 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
         function toggleCardSelection(card) {{
             setSelected(card, card.dataset.selected !== '1');
             updateCounts();
+        }}
+
+        function moveCard(card, direction) {{
+            if (!card) return;
+            const parent = card.parentElement;
+            if (!parent) return;
+            if (direction < 0) {{
+                const prev = card.previousElementSibling;
+                if (prev) parent.insertBefore(card, prev);
+            }} else {{
+                const next = card.nextElementSibling;
+                if (next) parent.insertBefore(next, card);
+            }}
+            refreshRanks();
         }}
 
         function selectAll() {{
@@ -322,6 +345,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             }});
             return {{
                 selected_ids: records.filter(r => r.selected).map(r => r.item_id),
+                ordered_ids: getCards().map(card => parseInt(card.dataset.itemId, 10)),
                 feedback: records,
             }};
         }}
@@ -332,7 +356,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                 alert('请至少选择 1 条');
                 return;
             }}
-            if (!confirm(`确认推送 ${{payload.selected_ids.length}} 条资讯到飞书？`)) return;
+            if (!confirm(`确认推送 ${{payload.selected_ids.length}} 条资讯到飞书吗？`)) return;
 
             document.getElementById('overlay').classList.add('active');
             fetch('/submit', {{
@@ -381,6 +405,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                     toggleFeedback(cardId, label, chip);
                 }});
             }});
+            refreshRanks();
             updateCounts();
         }});
     </script>
@@ -414,6 +439,8 @@ REVIEW_CARD_TEMPLATE = """            <div class="card selected"
                 </div>
                 <div class="actions">
                     <button type="button" class="toggle-btn" onclick="toggleCardSelection(this.closest('.card'))">保留推送</button>
+                    <button type="button" class="move-btn" onclick="moveCard(this.closest('.card'), -1)">上移</button>
+                    <button type="button" class="move-btn" onclick="moveCard(this.closest('.card'), 1)">下移</button>
                     <a class="link" href="{url}" target="_blank" rel="noopener">查看原文</a>
                 </div>
                 <div class="feedback-title">反馈标签</div>
@@ -426,6 +453,7 @@ REVIEW_CARD_TEMPLATE = """            <div class="card selected"
 class ReviewResult:
     def __init__(self):
         self.selected_ids = None
+        self.ordered_ids = []
         self.feedback = []
         self.completed = threading.Event()
 
@@ -526,7 +554,15 @@ def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_
     )
 
 
-def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info_func, port=18088, audio_item_urls=None):
+def start_review_server(
+    items,
+    infer_tags_func,
+    pick_emoji_func,
+    get_source_info_func,
+    port=18088,
+    audio_item_urls=None,
+    on_ready=None,
+):
     review_result = ReviewResult()
     page_html = _build_review_page(
         items,
@@ -560,6 +596,7 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
                 self.end_headers()
                 self.wfile.write(b'{"ok": true}')
                 review_result.selected_ids = []
+                review_result.ordered_ids = []
                 review_result.feedback = []
                 review_result.completed.set()
                 threading.Thread(target=self._shutdown_server, daemon=True).start()
@@ -578,6 +615,7 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
             try:
                 data = json.loads(body or "{}")
                 review_result.selected_ids = data.get("selected_ids", [])
+                review_result.ordered_ids = data.get("ordered_ids", [])
                 review_result.feedback = data.get("feedback", [])
                 review_result.completed.set()
                 response = {
@@ -608,8 +646,15 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
     print(f"  审核页已启动: {url}")
     print(f"  共 {len(items)} 条待审核")
     print("  现已支持反馈标签：有用 / 一般 / 无关 / 太偏技术 / 太偏商业 / 适合音频部")
+    print("  现已支持排序：卡片可上移 / 下移，提交时会保留你的顺序")
     print("  快捷键：Ctrl+A 全选 | Ctrl+I 反选 | Ctrl+Enter 提交")
     print(f"  {'=' * 56}\n")
+
+    if callable(on_ready):
+        try:
+            on_ready(url, items)
+        except Exception as exc:
+            print(f"  [WARN] 审核链接通知失败: {exc}")
 
     webbrowser.open(url)
     review_result.completed.wait()
@@ -629,11 +674,24 @@ def start_review_server(items, infer_tags_func, pick_emoji_func, get_source_info
         if isinstance(idx, int):
             feedback_map[idx] = row
 
+    items_by_id = {idx: item for idx, item in enumerate(items)}
+    selected_id_set = {idx for idx in review_result.selected_ids if isinstance(idx, int)}
+    ordered_selected_ids = []
+    for idx in review_result.ordered_ids or []:
+        if isinstance(idx, int) and idx in selected_id_set and idx not in ordered_selected_ids:
+            ordered_selected_ids.append(idx)
+    for idx in review_result.selected_ids or []:
+        if isinstance(idx, int) and idx in selected_id_set and idx not in ordered_selected_ids:
+            ordered_selected_ids.append(idx)
+
     selected_items = []
-    for i, item in enumerate(items):
-        if i in review_result.selected_ids:
-            row = feedback_map.get(i, {})
-            item["_review_feedback_labels"] = row.get("labels", [])
-            selected_items.append(item)
+    for rank, idx in enumerate(ordered_selected_ids, 1):
+        item = items_by_id.get(idx)
+        if not item:
+            continue
+        row = feedback_map.get(idx, {})
+        item["_review_feedback_labels"] = row.get("labels", [])
+        item["_review_rank"] = rank
+        selected_items.append(item)
     print(f"  审核完成！用户选择了 {len(selected_items)}/{len(items)} 条")
     return selected_items

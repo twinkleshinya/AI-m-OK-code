@@ -64,6 +64,10 @@ FEISHU_WEBHOOKS = os.environ.get(
     "FEISHU_WEBHOOKS",
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00"
 ).split(",")
+REVIEW_NOTIFY_WEBHOOKS = os.environ.get(
+    "REVIEW_NOTIFY_WEBHOOKS",
+    "https://open.feishu.cn/open-apis/bot/v2/hook/01c129a5-baa4-400d-a980-9138d5d7168d",
+).split(",")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -109,6 +113,7 @@ MAX_FUNDING_POLICY = 2
 PRODUCT_HEAT_THRESHOLD = 90
 FEISHU_TOP_N = 15
 FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
+MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "3"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -1208,7 +1213,7 @@ def build_feedback_profile(limit=1200):
             elif row.get("selected") is False:
                 labels = []
         if not labels and row.get("selected") is False:
-            weight = -0.15
+            weight = -0.35
         else:
             weight = 0.0
 
@@ -1218,10 +1223,12 @@ def build_feedback_profile(limit=1200):
                 "有用": 2.5,
                 "适合音频部": 3.0,
                 "一般": 0.5,
-                "无关": -2.0,
-                "太偏技术": -1.0,
-                "太偏商业": -2.5,
+                "无关": -2.8,
+                "太偏技术": -1.4,
+                "太偏商业": -3.2,
             }.get(label, 0.0)
+        if row.get("selected") is False and labels:
+            weight -= 0.6
 
         source = str(row.get("source", "") or "").strip()
         category = str(row.get("category", "") or "").strip()
@@ -1252,6 +1259,30 @@ def feedback_bias_score(item, profile=None):
         if matched:
             score += sum(matched[:10]) / max(3, min(len(matched), 10))
     return round(score, 2)
+
+
+def should_filter_by_feedback_profile(item, profile=None):
+    profile = profile or build_feedback_profile()
+    score = feedback_bias_score(item, profile)
+    source = str(item.get("source", "") or "")
+    category = str(item.get("category", "") or "")
+    source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
+    category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
+    term_bias = profile.get("term_bias", {})
+    strong_negative_terms = sum(
+        1
+        for term in _extract_feedback_terms(item)
+        if float(term_bias.get(term, 0.0) or 0.0) <= -2.5
+    )
+    if score <= -4.0:
+        return True
+    if strong_negative_terms >= 2 and score <= -2.6:
+        return True
+    if source_bias <= -8.0 and score <= -2.2:
+        return True
+    if category_bias <= -8.0 and score <= -2.2:
+        return True
+    return False
 
 
 def get_wechat_account_hint(item):
@@ -5918,12 +5949,17 @@ def calculate_heat_score(item):
 def deduplicate_and_rank(all_items):
     items = quality_filter(all_items)
     feedback_profile = build_feedback_profile()
+    feedback_filtered_count = 0
+    scored_items = []
 
     for item in items:
         item.setdefault("_pool", pool_bucket(item))
         item["heat_score"] = calculate_heat_score(item)
         item["audio_score"] = item.get("audio_score", audio_relevance_score(item))
         item["feedback_bias"] = feedback_bias_score(item, feedback_profile)
+        if should_filter_by_feedback_profile(item, feedback_profile):
+            feedback_filtered_count += 1
+            continue
         item["heat_score"] += item["audio_score"] * 8 + item["feedback_bias"] * 6
         if item.get("_pool") == "A":
             item["heat_score"] += 12
@@ -5936,6 +5972,11 @@ def deduplicate_and_rank(all_items):
         if item.get("is_social"):
             completeness += 20
         item["_completeness"] = completeness
+        scored_items.append(item)
+
+    items = scored_items
+    if feedback_filtered_count:
+        print(f"      [v3.8] 基于历史审核偏好过滤: {feedback_filtered_count} 条")
 
     items = [
         it for it in items
@@ -6779,6 +6820,61 @@ def select_audio_special_items(items, limit=None):
     return selected
 
 
+def select_audio_review_candidates(items, limit=None):
+    limit = limit or max(FEISHU_AUDIO_TOP_N * 4, MIN_AUDIO_REVIEW_CHOICES * 3, 12)
+    candidates = []
+    for item in items:
+        if is_business_finance_noise(item):
+            continue
+        if is_security_or_hype_noise(item):
+            continue
+        if is_practice_excluded_topic(item):
+            continue
+        if not is_audio_special_item(item):
+            continue
+        if audio_editorial_excluded(item):
+            continue
+        if item.get("source") == WECHAT_SOURCE_NAME:
+            if not (
+                wechat_keyword_gate(item)
+                or audio_editorial_priority(item)
+                or audio_editorial_core_hit(item)
+                or audio_relevance_score(item) >= 2
+            ):
+                continue
+        score = float(item.get("heat_score", 0) or 0)
+        score += audio_relevance_score(item) * 14
+        if audio_editorial_priority(item):
+            score += 34
+        if audio_editorial_core_hit(item):
+            score += 18
+        if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
+            score += 12
+        if item.get("is_priority_wechat"):
+            score += 8
+        candidates.append((score, item))
+
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    selected = []
+    seen_urls = set()
+    seen_titles = []
+    for _, item in candidates:
+        url = str(item.get("url", "") or "").rstrip("/")
+        title = str(item.get("title", "") or "").strip()
+        if url and url in seen_urls:
+            continue
+        if title and is_duplicate_title(title, seen_titles, threshold=0.6):
+            continue
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.append(title)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def is_item_link_accessible(item):
     url = str(item.get("url", "") or "").strip()
     if not url:
@@ -6823,14 +6919,21 @@ def filter_inaccessible_items(items):
 
 def build_review_feedback_records(all_review_items, selected_items):
     selected_urls = {str(it.get("url", "") or "").rstrip("/") for it in selected_items}
+    selected_rank_map = {
+        str(it.get("url", "") or "").rstrip("/"): idx + 1
+        for idx, it in enumerate(selected_items)
+        if it.get("url")
+    }
     rows = []
     ts = datetime.now(BEIJING_TZ).isoformat()
-    for item in all_review_items:
+    for idx, item in enumerate(all_review_items, 1):
         url = str(item.get("url", "") or "").rstrip("/")
         labels = _normalize_feedback_labels(item.get("_review_feedback_labels", []))
         rows.append({
             "timestamp": ts,
             "selected": url in selected_urls,
+            "review_rank": idx,
+            "selected_rank": selected_rank_map.get(url, 0),
             "source": item.get("source", ""),
             "category": item.get("category", ""),
             "pool": item.get("_pool", ""),
@@ -6851,11 +6954,17 @@ def build_review_feedback_records(all_review_items, selected_items):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_feishu_card(items, date_str, audio_source_items=None):
-    feishu_items = sorted(items, key=lambda x: x.get("heat_score", 0), reverse=True)[:FEISHU_TOP_N]
+    feishu_items = sorted(
+        items,
+        key=lambda x: (
+            int(x.get("_review_rank", 10**6)),
+            -float(x.get("heat_score", 0) or 0),
+        ),
+    )[:FEISHU_TOP_N]
     audio_source_items = audio_source_items if audio_source_items is not None else items
-    audio_candidates = select_audio_special_items(
+    audio_candidates = select_audio_review_candidates(
         audio_source_items,
-        limit=max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N),
+        limit=max(FEISHU_AUDIO_TOP_N * 3, MIN_AUDIO_REVIEW_CHOICES, FEISHU_AUDIO_TOP_N),
     )
 
     total_count = len(items)
@@ -6989,9 +7098,10 @@ def build_feishu_card(items, date_str, audio_source_items=None):
         },
     }
 
-def push_feishu(payload):
+def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     success_count = 0
-    for i, webhook in enumerate(FEISHU_WEBHOOKS, 1):
+    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    for i, webhook in enumerate(valid_webhooks, 1):
         try:
             resp = requests.post(
                 webhook.strip(),
@@ -7001,13 +7111,33 @@ def push_feishu(payload):
             )
             result = resp.json()
             if result.get("StatusCode") == 0 or result.get("code") == 0:
-                print(f"[OK] Feishu push succeeded ✅ -> 群{i}")
+                print(f"[OK] Feishu push succeeded ✅ -> {label_prefix}{i}")
                 success_count += 1
             else:
-                print(f"[WARN] Feishu response -> 群{i}: {result}")
+                print(f"[WARN] Feishu response -> {label_prefix}{i}: {result}")
         except Exception as e:
-            print(f"[ERROR] Feishu push failed -> 群{i}: {e}")
+            print(f"[ERROR] Feishu push failed -> {label_prefix}{i}: {e}")
     return success_count > 0
+
+
+def push_feishu(payload):
+    return push_feishu_to_webhooks(payload, FEISHU_WEBHOOKS, "群")
+
+
+def push_review_link_to_feishu(review_url, total_count, audio_count):
+    payload = {
+        "msg_type": "text",
+        "content": {
+            "text": (
+                f"AI'm OK 审核页已生成\n"
+                f"链接：{review_url}\n"
+                f"待审条目：{total_count} 条\n"
+                f"AI音频候选：{audio_count} 条\n"
+                f"说明：未完成人工审核，不会推送到飞书群。"
+            )
+        },
+    }
+    return push_feishu_to_webhooks(payload, REVIEW_NOTIFY_WEBHOOKS, "审核提醒")
 
 def publish_to_pages(html_content, date_str):
     try:
@@ -7203,23 +7333,25 @@ def main():
     quality_passed_items = quality_filter([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
     audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
+    audio_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items])
     audio_injected = []
     final_urls = {
         str(it.get("url", "")).rstrip("/")
         for it in final
         if it.get("url")
     }
-    for item in audio_special_pool:
+    for item in audio_review_pool:
         url = str(item.get("url", "")).rstrip("/")
         if not url or url in final_urls:
             continue
         audio_injected.append(item)
         final.append(item)
         final_urls.add(url)
-        if len(audio_injected) >= max(FEISHU_AUDIO_TOP_N, 4):
+        if len(audio_injected) >= max(FEISHU_AUDIO_TOP_N, MIN_AUDIO_REVIEW_CHOICES, 5):
             break
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
+    print(f"      Audio review pool: {len(audio_review_pool)}")
     if audio_injected:
         print(f"      Audio injected for review/push: {len(audio_injected)}")
 
@@ -7231,9 +7363,10 @@ def main():
     final = generate_chinese_summaries(final)
     final = filter_inaccessible_items(final)
     audio_special_pool = select_audio_special_items([dict(it) for it in final])
+    audio_review_pool = select_audio_review_candidates([dict(it) for it in final])
     audio_review_urls = {
         str(item.get("url", "")).rstrip("/")
-        for item in audio_special_pool
+        for item in audio_review_pool
         if item.get("url")
     }
     review_candidates = [dict(item) for item in final]
@@ -7250,6 +7383,15 @@ def main():
             get_source_info_func=get_source_info,
             port=18088,
             audio_item_urls=audio_review_urls,
+            on_ready=lambda review_url, review_items: push_review_link_to_feishu(
+                review_url=review_url,
+                total_count=len(review_items),
+                audio_count=sum(
+                    1
+                    for it in review_items
+                    if str(it.get("url", "")).rstrip("/") in audio_review_urls
+                ),
+            ),
         )
         if not final:
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
@@ -7260,7 +7402,7 @@ def main():
         print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
         return
 
-    selected_audio_pool = select_audio_special_items([dict(it) for it in final])
+    selected_audio_pool = select_audio_review_candidates([dict(it) for it in final])
     if not selected_audio_pool:
         print("[ERROR] 人工审核后未保留任何 AI音频资讯，本次不推送飞书。")
         return
