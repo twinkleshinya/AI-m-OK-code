@@ -202,7 +202,8 @@ WECHAT_OFFICIAL_ACCOUNTS = [
         "AI产品阿颖,艾话连篇,AI竹笋集,牛哥谈Ai,数字生命卡兹克,MacTalk,九月AI学习笔记,阿枫科技,算法社,"
         "AI工具派,罗斯基,游戏陀螺,美股研究社,加百力,IEEE电气电子工程师学会,Second Sentience,游戏花火,"
         "电子咖啡,游戏茶馆,游戏进化论,游戏研究社,Z Potentials,游戏日报,差评X.PIN,竞核,逛逛GitHub,莫理,尘红,"
-        "AI大模型调参指北笔记,绿联NAS私有云,非凡产研,测试工程化,AI音频时代,HsuDan,AI前锋团,钻进盒子里,工具驯兽师,资源设,科技探幽"
+        "AI大模型调参指北笔记,绿联NAS私有云,非凡产研,测试工程化,AI音频时代,HsuDan,AI前锋团,钻进盒子里,工具驯兽师,资源设,科技探幽,"
+        "APPSO,冉胖子AI时光机"
     ).split(",")
     if x.strip()
 ]
@@ -220,6 +221,8 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "AI科技大本营",
     "PaperWeekly",
     "夕小瑶科技说",
+    "APPSO",
+    "冉胖子AI时光机",
 }
 WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "风亭韵律",
@@ -227,6 +230,15 @@ WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "电影声音网Filmsound.cn",
     "AI音频时代",
     "上和弦",
+    "冉胖子AI时光机",
+}
+
+KNOWN_DELETED_URL_TOKENS = {
+    "TtkOGhulm6m5f0MzWk4z6A",
+}
+HIGH_VALUE_AUDIO_URL_TOKENS = {
+    "4TfXl9d0ohiCyBfdVpRB8w",
+    "mIvALhN8VU5rhhl63-tcMg",
 }
 
 AUDIO_CREATOR_PAGES = [
@@ -1146,8 +1158,9 @@ def _extract_feedback_terms(item):
 
     for token in [
         "音频", "语音", "配音", "播客", "转写", "降噪", "混音", "母带", "音乐", "游戏",
-        "教程", "实战", "案例", "工作流", "智能体", "agent", "workflow", "rag",
+        "教程", "实战", "案例", "工作流", "创作", "应用", "工具", "智能体", "agent", "workflow", "rag",
         "开源", "github", "模型", "大模型", "自动化", "技能", "skill", "skills",
+        "ai音频", "ai音乐", "音乐生成", "音频生成", "声音", "sound", "voice", "tts", "asr",
     ]:
         if token.lower() in combined:
             terms.add(token.lower())
@@ -2523,6 +2536,32 @@ def _extract_werss_token(data):
     return ""
 
 
+def _url_has_token(url, tokens):
+    text = str(url or "")
+    return any(token and token in text for token in tokens)
+
+
+def is_known_deleted_url(item_or_url):
+    url = item_or_url if isinstance(item_or_url, str) else (item_or_url or {}).get("url", "")
+    return _url_has_token(url, KNOWN_DELETED_URL_TOKENS)
+
+
+def is_high_value_audio_example(item):
+    url = str((item or {}).get("url", "") or "")
+    if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS):
+        return True
+    text = build_item_filter_text(item, include_query=True)
+    return bool(re.search(
+        r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音)"
+        r"|音频.{0,20}(AI|智能体|大模型).{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
+        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
+        r"|配音.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
+        r"|播客.{0,20}(工作流|创作|应用|案例|工具|教程|实战)",
+        text,
+        re.IGNORECASE,
+    ))
+
+
 def _looks_mojibake(text):
     s = str(text or "")
     return any(x in s for x in ("Ã", "Â", "ä", "å", "æ", "ç", "è", "é", "�"))
@@ -3769,6 +3808,8 @@ def practical_keyword_gate(item):
 
 def is_audio_special_item(item):
     text = build_item_filter_text(item, include_query=True)
+    if is_high_value_audio_example(item):
+        return True
     if is_security_or_hype_noise(item):
         return False
     return bool(
@@ -3832,6 +3873,8 @@ def is_practice_excluded_topic(item):
 
 
 def audio_editorial_core_hit(item):
+    if is_high_value_audio_example(item):
+        return True
     text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
     return bool(re.search(
         r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
@@ -3843,6 +3886,8 @@ def audio_editorial_core_hit(item):
 
 
 def audio_editorial_priority(item):
+    if is_high_value_audio_example(item) and not is_business_finance_noise(item) and not is_security_or_hype_noise(item):
+        return True
     text = build_item_filter_text(item, include_query=True)
     if not is_audio_special_item(item):
         return False
@@ -5779,6 +5824,8 @@ def quality_filter(items):
         summary = item.get("summary", "")
         text = f"{title} {summary}"
 
+        if is_known_deleted_url(item):
+            continue
         if HARD_BLOCK_DOMAINS.search(url):
             continue
         if REMOVED_SOURCE_DOMAINS.search(url):
@@ -5944,6 +5991,8 @@ def calculate_heat_score(item):
         heat += 18
     if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
         heat += 22
+    if is_high_value_audio_example(item):
+        heat += 80
     if item.get("is_priority_wechat"):
         heat += 20
     if get_wechat_account_hint(item):
@@ -6805,6 +6854,8 @@ def select_audio_special_items(items, limit=None):
                 continue
         score = float(item.get("heat_score", 0) or 0)
         score += audio_relevance_score(item) * 12
+        if is_high_value_audio_example(item):
+            score += 120
         if audio_editorial_priority(item):
             score += 40
         if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
@@ -6858,6 +6909,8 @@ def select_audio_review_candidates(items, limit=None):
                 continue
         score = float(item.get("heat_score", 0) or 0)
         score += audio_relevance_score(item) * 14
+        if is_high_value_audio_example(item):
+            score += 120
         if audio_editorial_priority(item):
             score += 34
         if audio_editorial_core_hit(item):
@@ -6892,6 +6945,8 @@ def select_audio_review_candidates(items, limit=None):
 def is_item_link_accessible(item):
     url = str(item.get("url", "") or "").strip()
     if not url:
+        return False
+    if is_known_deleted_url(url):
         return False
     if "mp.weixin.qq.com/" not in url:
         return True
