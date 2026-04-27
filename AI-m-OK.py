@@ -1145,6 +1145,13 @@ def _normalize_feedback_label(label):
         "太偏技术": "太偏技术",
         "太偏商业": "太偏商业",
         "适合音频部": "适合音频部",
+        "重复": "重复",
+        "产品重复": "产品重复",
+        "不实用": "不实用",
+        "太泛": "太泛",
+        "安全漏洞": "安全漏洞",
+        "商业融资": "商业融资",
+        "航天/医疗": "航天/医疗",
     }
     return mapping.get(value, "")
 
@@ -1160,14 +1167,60 @@ def _normalize_feedback_labels(labels):
     return normalized
 
 
+POSITIVE_FEEDBACK_LABELS = {"有用", "适合音频部"}
+SOFT_POSITIVE_FEEDBACK_LABELS = {"一般"}
+NEGATIVE_FEEDBACK_LABELS = {
+    "无关", "太偏技术", "太偏商业", "重复", "产品重复",
+    "不实用", "太泛", "安全漏洞", "商业融资", "航天/医疗",
+}
+
+
+def _feedback_label_weight(label):
+    return {
+        "有用": 2.8,
+        "适合音频部": 3.2,
+        "一般": 0.4,
+        "无关": -3.0,
+        "太偏技术": -1.6,
+        "太偏商业": -3.4,
+        "重复": -2.4,
+        "产品重复": -3.6,
+        "不实用": -2.6,
+        "太泛": -2.2,
+        "安全漏洞": -3.4,
+        "商业融资": -3.6,
+        "航天/医疗": -3.4,
+    }.get(label, 0.0)
+
+
+def _feedback_labels_weight(labels, selected=None):
+    normalized = _normalize_feedback_labels(labels)
+    if not normalized:
+        return -0.35 if selected is False else 0.0
+    weight = sum(_feedback_label_weight(label) for label in normalized)
+    if selected is False:
+        weight -= 0.6
+    if selected is True and any(label in POSITIVE_FEEDBACK_LABELS for label in normalized):
+        weight += 0.8
+    return weight
+
+
+def _is_negative_feedback(labels):
+    labels = _normalize_feedback_labels(labels)
+    return any(label in NEGATIVE_FEEDBACK_LABELS for label in labels)
+
+
 def _extract_feedback_terms(item):
     terms = set()
     title = str(item.get("title", "") or "")
     title_zh = str(item.get("title_zh", "") or "")
     summary = str(item.get("summary", "") or "")
     summary_zh = str(item.get("summary_zh", "") or "")
+    content_excerpt = str(item.get("content_excerpt", "") or "")
     search_query = str(item.get("search_query", "") or "")
-    combined = " ".join([title, title_zh, summary, summary_zh, search_query]).lower()
+    product_key = extract_product_dedup_key(item)
+    event_fp = extract_event_fingerprint(item)
+    combined = " ".join([title, title_zh, summary, summary_zh, content_excerpt, search_query, product_key, event_fp]).lower()
 
     for match in re.findall(r"[a-z][a-z0-9\-\+\.]{2,}", combined):
         if len(match) >= 3:
@@ -1178,6 +1231,7 @@ def _extract_feedback_terms(item):
         "教程", "实战", "案例", "工作流", "创作", "应用", "工具", "智能体", "agent", "workflow", "rag",
         "开源", "github", "模型", "大模型", "自动化", "技能", "skill", "skills",
         "ai音频", "ai音乐", "音乐生成", "音频生成", "声音", "sound", "voice", "tts", "asr",
+        "融资", "商业", "安全漏洞", "航天", "医疗", "芯片", "gpu", "数据中心",
     ]:
         if token.lower() in combined:
             terms.add(token.lower())
@@ -1241,6 +1295,11 @@ def build_feedback_profile(limit=1200):
         "source_bias": {},
         "category_bias": {},
         "term_bias": {},
+        "product_bias": {},
+        "event_bias": {},
+        "domain_bias": {},
+        "account_bias": {},
+        "negative_reason_counts": {},
     }
     for row in rows:
         labels = _normalize_feedback_labels(row.get("labels") or row.get("label"))
@@ -1249,30 +1308,30 @@ def build_feedback_profile(limit=1200):
                 labels = ["一般"]
             elif row.get("selected") is False:
                 labels = []
-        if not labels and row.get("selected") is False:
-            weight = -0.35
-        else:
-            weight = 0.0
-
+        weight = _feedback_labels_weight(labels, selected=row.get("selected"))
         for label in labels:
             profile["label_counts"][label] = profile["label_counts"].get(label, 0) + 1
-            weight += {
-                "有用": 2.5,
-                "适合音频部": 3.0,
-                "一般": 0.5,
-                "无关": -2.8,
-                "太偏技术": -1.4,
-                "太偏商业": -3.2,
-            }.get(label, 0.0)
-        if row.get("selected") is False and labels:
-            weight -= 0.6
+            if label in NEGATIVE_FEEDBACK_LABELS:
+                profile["negative_reason_counts"][label] = profile["negative_reason_counts"].get(label, 0) + 1
 
         source = str(row.get("source", "") or "").strip()
         category = str(row.get("category", "") or "").strip()
+        domain = str(row.get("domain", "") or "").strip().lower()
+        account = str(row.get("account_name", "") or "").strip()
+        product_key = str(row.get("product_key", "") or "").strip()
+        event_fp = str(row.get("event_fingerprint", "") or "").strip()
         if source:
             profile["source_bias"][source] = profile["source_bias"].get(source, 0.0) + weight
         if category:
             profile["category_bias"][category] = profile["category_bias"].get(category, 0.0) + weight
+        if domain and abs(weight) >= 1.0:
+            profile["domain_bias"][domain] = profile["domain_bias"].get(domain, 0.0) + weight
+        if account and abs(weight) >= 1.0:
+            profile["account_bias"][account] = profile["account_bias"].get(account, 0.0) + weight
+        if product_key and abs(weight) >= 1.0:
+            profile["product_bias"][product_key] = profile["product_bias"].get(product_key, 0.0) + weight
+        if event_fp and abs(weight) >= 1.0:
+            profile["event_bias"][event_fp] = profile["event_bias"].get(event_fp, 0.0) + weight
         for term in row.get("terms", [])[:20]:
             t = str(term or "").strip().lower()
             if not t:
@@ -1286,8 +1345,16 @@ def feedback_bias_score(item, profile=None):
     score = 0.0
     source = str(item.get("source", "") or "")
     category = str(item.get("category", "") or "")
+    domain = (urlparse(str(item.get("url", "") or "")).netloc or "").lower().replace("www.", "")
+    account = str(item.get("account_name", "") or "").strip()
+    product_key = extract_product_dedup_key(item)
+    event_fp = extract_event_fingerprint(item)
     score += profile.get("source_bias", {}).get(source, 0.0) * 1.2
     score += profile.get("category_bias", {}).get(category, 0.0) * 1.0
+    score += profile.get("domain_bias", {}).get(domain, 0.0) * 0.6
+    score += profile.get("account_bias", {}).get(account, 0.0) * 0.7
+    score += profile.get("product_bias", {}).get(product_key, 0.0) * 1.4
+    score += profile.get("event_bias", {}).get(event_fp, 0.0) * 1.1
 
     terms = _extract_feedback_terms(item)
     term_bias = profile.get("term_bias", {})
@@ -1303,8 +1370,16 @@ def should_filter_by_feedback_profile(item, profile=None):
     score = feedback_bias_score(item, profile)
     source = str(item.get("source", "") or "")
     category = str(item.get("category", "") or "")
+    domain = (urlparse(str(item.get("url", "") or "")).netloc or "").lower().replace("www.", "")
+    account = str(item.get("account_name", "") or "").strip()
+    product_key = extract_product_dedup_key(item)
+    event_fp = extract_event_fingerprint(item)
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
+    domain_bias = float(profile.get("domain_bias", {}).get(domain, 0.0) or 0.0)
+    account_bias = float(profile.get("account_bias", {}).get(account, 0.0) or 0.0)
+    product_bias = float(profile.get("product_bias", {}).get(product_key, 0.0) or 0.0)
+    event_bias = float(profile.get("event_bias", {}).get(event_fp, 0.0) or 0.0)
     term_bias = profile.get("term_bias", {})
     strong_negative_terms = sum(
         1
@@ -1313,11 +1388,19 @@ def should_filter_by_feedback_profile(item, profile=None):
     )
     if score <= -4.0:
         return True
+    if product_key and product_bias <= -3.2 and score <= -1.5:
+        return True
+    if event_fp and event_bias <= -4.0 and score <= -1.8:
+        return True
     if strong_negative_terms >= 2 and score <= -2.6:
         return True
     if source_bias <= -8.0 and score <= -2.2:
         return True
     if category_bias <= -8.0 and score <= -2.2:
+        return True
+    if domain_bias <= -10.0 and score <= -2.4:
+        return True
+    if account_bias <= -10.0 and score <= -2.4:
         return True
     return False
 
@@ -7064,6 +7147,31 @@ def filter_inaccessible_items(items):
     return kept
 
 
+def infer_feedback_reasons(item, labels=None):
+    labels = _normalize_feedback_labels(labels or [])
+    reasons = []
+    if is_business_finance_noise(item):
+        reasons.append("business_finance")
+    if is_security_or_hype_noise(item):
+        reasons.append("security_or_hype")
+    if is_practice_excluded_topic(item):
+        reasons.append("excluded_topic")
+    if is_non_practical_news(item):
+        reasons.append("non_practical_news")
+    if not is_practical_candidate(item):
+        reasons.append("weak_practical_signal")
+    if extract_product_dedup_key(item):
+        reasons.append("product_key:" + extract_product_dedup_key(item))
+    for label in labels:
+        if label in NEGATIVE_FEEDBACK_LABELS:
+            reasons.append("label:" + label)
+    deduped = []
+    for reason in reasons:
+        if reason and reason not in deduped:
+            deduped.append(reason)
+    return deduped
+
+
 def build_review_feedback_records(all_review_items, selected_items):
     selected_urls = {str(it.get("url", "") or "").rstrip("/") for it in selected_items}
     selected_rank_map = {
@@ -7076,6 +7184,10 @@ def build_review_feedback_records(all_review_items, selected_items):
     for idx, item in enumerate(all_review_items, 1):
         url = str(item.get("url", "") or "").rstrip("/")
         labels = _normalize_feedback_labels(item.get("_review_feedback_labels", []))
+        parsed = urlparse(url)
+        domain = (parsed.netloc or "").lower().replace("www.", "")
+        product_key = extract_product_dedup_key(item)
+        event_fp = extract_event_fingerprint(item)
         rows.append({
             "timestamp": ts,
             "selected": url in selected_urls,
@@ -7083,11 +7195,16 @@ def build_review_feedback_records(all_review_items, selected_items):
             "selected_rank": selected_rank_map.get(url, 0),
             "source": item.get("source", ""),
             "category": item.get("category", ""),
+            "domain": domain,
+            "account_name": item.get("account_name", ""),
             "pool": item.get("_pool", ""),
             "url": url,
             "title": item.get("title", ""),
             "title_zh": item.get("title_zh", ""),
             "labels": labels,
+            "inferred_reasons": infer_feedback_reasons(item, labels),
+            "product_key": product_key,
+            "event_fingerprint": event_fp,
             "terms": _extract_feedback_terms(item),
             "practical_score": item.get("practical_score", 0),
             "audio_score": item.get("audio_score", 0),
