@@ -5722,6 +5722,8 @@ def audio_relevance_score(item):
         score += 3
     if item.get("is_video"):
         score += 1
+    if is_high_value_audio_example(item):
+        score = max(score, 8)
     return score
 
 
@@ -5923,8 +5925,11 @@ def quality_filter(items):
         pscore = practical_relevance_score(item)
         item["practical_score"] = pscore
         item["audio_score"] = audio_relevance_score(item)
+        high_value_audio = is_high_value_audio_example(item)
         if PRACTICAL_STRICT_ONLY:
             item_pool = pool_bucket(item)
+            if high_value_audio and item_pool == "DROP":
+                item_pool = "A"
             item["_pool"] = item_pool
             if item_pool == "DROP":
                 if not is_practical_candidate(item):
@@ -5939,6 +5944,9 @@ def quality_filter(items):
                 dynamic_threshold = max(1, dynamic_threshold - 1)
             if item_pool == "B":
                 dynamic_threshold = max(1, dynamic_threshold - 1)
+            if high_value_audio and pscore < dynamic_threshold:
+                item["practical_score"] = dynamic_threshold
+                pscore = dynamic_threshold
             if pscore < dynamic_threshold and item_pool != "B":
                 practical_filtered_count += 1
                 continue
