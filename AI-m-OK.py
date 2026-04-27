@@ -625,6 +625,15 @@ PRACTICAL_SIGNAL = re.compile(
     re.IGNORECASE,
 )
 
+PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
+    r"实测|体验|上手|测评|评测|可用|直接使用|直接进入|入口|面板|创作面板"
+    r"|一句指令|一条指令|指令|prompt|提示词|生成|生视频|视频创作|故事板|分镜|运镜"
+    r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音"
+    r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
+    r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
+    re.IGNORECASE,
+)
+
 REUSABLE_SIGNAL = re.compile(
     r"open.?source|repo|github|模板|template|脚手架|boilerplate|sdk|api|示例代码|代码仓库"
     r"|插件市场|workflow模板|automation模板|prompt模板|agent模板|工程模板"
@@ -756,6 +765,8 @@ REQUIRED_TERMS = [
     r"部署", r"上手", r"集成", r"文档", r"示例", r"demo", r"example",
     r"github", r"repo", r"readme", r"quickstart", r"usage", r"guide",
     r"plugin", r"template", r"best practice", r"playbook", r"技能", r"技巧", r"流程", r"拆解",
+    r"实测", r"体验", r"测评", r"评测", r"创作面板", r"一句指令", r"提示词",
+    r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
 ]
 
@@ -787,6 +798,9 @@ PRACTICE_REQUIRED_TERMS = [
     r"\bCLI\b", r"脚本", r"自动化", r"automation", r"提示词", r"prompt", r"开源", r"复现",
     r"可复用", r"starter", r"工具", r"tool(?:s|ing)?", r"skills?", r"音频工作流", r"配音",
     r"播客", r"混音", r"母带", r"转写", r"字幕", r"Unity", r"Unreal",
+    r"实测", r"体验", r"测评", r"评测", r"可用", r"直接使用", r"创作面板",
+    r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
+    r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
     r"搜索摘要", r"知识库", r"报表", r"工作区", r"客服", r"低代码", r"无代码",
 ]
 
@@ -2713,6 +2727,7 @@ def _build_werss_item(source_name, row, query="WeRSS"):
     if not title:
         title = query + " 微信文章"
     summary = _pick_werss_value(row, ("digest", "summary", "description", "desc", "content"))
+    content_excerpt = _truncate_text(_html_to_plain_text(_pick_werss_value(row, ("content", "html", "article_content", "articleContent"))), 1200)
     account_name = _pick_werss_value(row, ("mp_name", "mpName", "account_name", "accountName", "author", "source"))
     date_val = _normalize_werss_date(_pick_werss_value(row, (
         "publish_time", "publishTime", "published_at", "publishedAt", "created_at",
@@ -2729,6 +2744,8 @@ def _build_werss_item(source_name, row, query="WeRSS"):
     if date_val:
         item["date"] = date_val
         item["date_inferred"] = False
+    if content_excerpt:
+        item["content_excerpt"] = content_excerpt
     return item
 
 
@@ -2939,6 +2956,7 @@ def _fetch_wechat_from_werss_sqlite(source_name, feed_ids=None, max_items=None):
             a.title,
             a.url,
             a.description,
+            a.content,
             a.publish_time,
             a.created_at,
             a.updated_at,
@@ -2963,6 +2981,7 @@ def _fetch_wechat_from_werss_sqlite(source_name, feed_ids=None, max_items=None):
                 "article_url": row.get("url", ""),
                 "title": row.get("title", ""),
                 "digest": row.get("description", ""),
+                "content": row.get("content", ""),
                 "mp_name": row.get("mp_name", ""),
                 "publish_time": row.get("publish_time") or row.get("updated_at") or row.get("created_at"),
             }, query="WeRSS SQLite")
@@ -3700,6 +3719,7 @@ def build_item_filter_text(item, include_query=False):
     parts = [
         item.get("title", ""),
         item.get("summary", ""),
+        item.get("content_excerpt", ""),
         item.get("title_zh", ""),
         item.get("summary_zh", ""),
         item.get("url", ""),
@@ -4168,6 +4188,14 @@ def _truncate_text(text, max_chars):
     text = re.sub(r"\s+", " ", text or "").strip()
     if len(text) > max_chars:
         return text[:max_chars] + "..."
+    return text
+
+
+def _html_to_plain_text(html):
+    text = unescape(str(html or ""))
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
@@ -5654,6 +5682,8 @@ def practical_relevance_score(item):
         score += 3
     if PRACTICAL_SIGNAL.search(text):
         score += 3
+    if PRACTICAL_EXPERIENCE_SIGNAL.search(support_text):
+        score += 4
     if REUSABLE_SIGNAL.search(text):
         score += 2
     if INNOVATION_SIGNAL.search(text):
@@ -5683,7 +5713,7 @@ def practical_relevance_score(item):
         score -= 8
     if ENTERPRISE_BIZ_FILTER.search(text):
         score -= 6
-    if EXCLUDE_PATTERN.search(support_text):
+    if EXCLUDE_PATTERN.search(support_text) and not PRACTICAL_EXPERIENCE_SIGNAL.search(support_text):
         score -= 12
     if is_non_actionable_page(item):
         score -= 12
@@ -5693,7 +5723,9 @@ def practical_relevance_score(item):
         score -= 8
 
     # 社媒/视频来源如果没有实践信号，额外降权，减少“标题党”进入
-    if (item.get("is_social") or SOCIAL_VIDEO_DOMAINS.search(url)) and not PRACTICE_REQUIRED_PATTERN.search(support_text):
+    if (item.get("is_social") or SOCIAL_VIDEO_DOMAINS.search(url)) and not (
+        PRACTICE_REQUIRED_PATTERN.search(support_text) or PRACTICAL_EXPERIENCE_SIGNAL.search(support_text)
+    ):
         score -= 2
 
     return score
@@ -5762,6 +5794,7 @@ def is_practical_candidate(item):
     text = build_item_filter_text(item, include_query=False)
     support_text = build_item_filter_text(item, include_query=True)
     practical_hit = bool(PRACTICAL_SIGNAL.search(text))
+    experience_hit = bool(PRACTICAL_EXPERIENCE_SIGNAL.search(support_text))
     reusable_hit = bool(REUSABLE_SIGNAL.search(text))
     innovation_hit = bool(INNOVATION_SIGNAL.search(text))
     model_hit = bool(MODEL_SIGNAL.search(text))
@@ -5771,7 +5804,7 @@ def is_practical_candidate(item):
     excluded_hit = bool(EXCLUDE_PATTERN.search(support_text))
     is_priority_wechat = item.get("source") == WECHAT_SOURCE_NAME and bool(item.get("is_priority_wechat"))
 
-    if excluded_hit:
+    if excluded_hit and not (ai_core_hit and practice_required_hit and experience_hit):
         return False
     if is_non_actionable_page(item):
         return False
@@ -5779,13 +5812,13 @@ def is_practical_candidate(item):
         return False
     if not ai_core_hit:
         return False
-    if is_priority_wechat and (practice_required_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
+    if is_priority_wechat and (practice_required_hit or experience_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
         return True
     if frontier_innovation_gate(item):
         return True
     if practice_required_hit:
         return True
-    if practical_hit or reusable_hit:
+    if practical_hit or experience_hit or reusable_hit:
         return True
     if innovation_hit and (model_hit or app_hit):
         return True
