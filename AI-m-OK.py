@@ -287,10 +287,10 @@ AUDIO_MUSIC_DOMAIN_LIMIT = int(os.environ.get("AUDIO_MUSIC_DOMAIN_LIMIT", "5" if
 FRONTIER_DOMAIN_LIMIT = int(os.environ.get("FRONTIER_DOMAIN_LIMIT", "6" if FAST_FETCH_MODE else "11"))
 DEEP_PAGE_DATE_IN_LISTING = os.environ.get("DEEP_PAGE_DATE_IN_LISTING", "0").strip().lower() in {"1", "true", "yes"}
 WECHAT_SEARCH_QUERY_LIMIT = int(os.environ.get("WECHAT_SEARCH_QUERY_LIMIT", "8" if FAST_FETCH_MODE else "16"))
-WECHAT_ENABLE_GOOGLE_NEWS = os.environ.get("WECHAT_ENABLE_GOOGLE_NEWS", "1").strip().lower() in {"1", "true", "yes"}
-WECHAT_ENABLE_RSSHUB = os.environ.get("WECHAT_ENABLE_RSSHUB", "0").strip().lower() in {"1", "true", "yes"}
-WECHAT_ENABLE_SOGOU = os.environ.get("WECHAT_ENABLE_SOGOU", "1").strip().lower() in {"1", "true", "yes"}
-WECHAT_ENABLE_BING = os.environ.get("WECHAT_ENABLE_BING", "1").strip().lower() in {"1", "true", "yes"}
+WECHAT_ENABLE_GOOGLE_NEWS = False
+WECHAT_ENABLE_RSSHUB = False
+WECHAT_ENABLE_SOGOU = False
+WECHAT_ENABLE_BING = False
 WECHAT_ENABLE_WERSS = os.environ.get("WECHAT_ENABLE_WERSS", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_ENV_FILE = os.environ.get("WERSS_ENV_FILE", "").strip()
 WERSS_ENV_CANDIDATES = [
@@ -1913,41 +1913,11 @@ def fetch_ai_frontier():
 def fetch_wechat_articles():
     source = WECHAT_SOURCE_NAME
     items = []
-    stats = {"raw": 0, "date": 0, "keyword": 0, "werss": 0, "google": 0, "rsshub": 0, "sogou": 0, "bing": 0, "priority": 0}
+    stats = {"raw": 0, "date": 0, "keyword": 0, "werss": 0, "priority": 0}
     print("      [B.5] 微信公众号文章抓取中...")
 
-    priority_accounts = [x for x in WECHAT_OFFICIAL_ACCOUNTS if x in WECHAT_PRIORITY_ACCOUNTS]
-    other_accounts = [x for x in WECHAT_OFFICIAL_ACCOUNTS if x not in WECHAT_PRIORITY_ACCOUNTS]
-
-    wechat_queries = [
-        "AI 教程 实战 工作流",
-        "AI agent 教程",
-        "AI 音频 工作流",
-        "AI 配音 工具",
-        "AI 播客 工作流",
-        "AI 音乐 制作",
-        "AI 游戏 开发",
-        "大模型 实战",
-        "DeepSeek Qwen Claude 教程",
-        "RAG 智能体 案例",
-        "开源 AI 工具 使用指南",
-        "语音 识别 合成 教程",
-        "AIGC 应用 案例",
-        "AI 编程 agent 工具",
-        "大模型 RAG 智能体 工作流",
-        "多模态 视频生成 图像生成",
-        "AI 开源 项目 GitHub",
-        "AI 最新 模型 发布",
-        "人工智能 创业 产品",
-        "机器学习 深度学习 论文",
-        "AI coding Claude Code Codex",
-    ]
-    for account in priority_accounts[:10]:
-        wechat_queries.insert(0, f"{account} AI")
-        wechat_queries.insert(1, f"{account} 音频 AI")
-        wechat_queries.insert(2, f"{account} 教程")
-
-    # 1) 本地 WeRSS / We-MP-RSS 主抓；公网搜索只作为兜底
+    # 微信公众号只走本地 WeRSS。公网搜狗/Bing/Google/RSSHub 长期不稳定，
+    # 关闭后可以显著缩短运行时间，并避免把不可访问的中转链接混进候选池。
     if WECHAT_ENABLE_WERSS:
         werss_items = _fetch_werss_wechat_articles(source_name=source, max_items=WERSS_FETCH_LIMIT)
         items.extend(werss_items)
@@ -1956,119 +1926,6 @@ def fetch_wechat_articles():
             print(f"      [B.5] WeRSS 本地抓取命中: {len(werss_items)} 条")
         else:
             print("  [WARN] WeRSS 本地抓取为空：请确认 http://127.0.0.1:8001 已启动，或设置 WERSS_BASES/WERSS_USERNAME/WERSS_PASSWORD")
-
-    # 2) 搜狗微信搜索兜底
-    sogou_queries = []
-    for account in priority_accounts[:6]:
-        sogou_queries.extend([
-            f"{account} AI",
-            f"{account} 音频",
-            f"{account} 教程",
-        ])
-    sogou_queries.extend([
-        "公众号 AI 音频 工作流",
-        "公众号 AI 配音 教程",
-        "公众号 AI 播客 工作流",
-        "公众号 AI agent 实战",
-        "公众号 大模型 应用 实战",
-        "公众号 AIGC 应用 案例",
-        "公众号 AI 编程 agent 工具",
-        "公众号 大模型 RAG 智能体 工作流",
-        "公众号 多模态 视频生成 图像生成",
-        "公众号 AI 开源 项目 GitHub",
-        "微信公众号 AI 最新 模型 发布",
-        "微信公众号 人工智能 创业 产品",
-        "微信公众号 机器学习 深度学习 论文",
-        "微信公众号 AI coding Claude Code Codex",
-    ])
-    if WECHAT_ENABLE_SOGOU:
-        sogou_items = _fetch_sogou_wechat_search(
-            source_name=source,
-            queries=sogou_queries,
-            max_items=18,
-            timeout=LISTING_FETCH_TIMEOUT,
-        )
-        items.extend(sogou_items)
-        stats["sogou"] = len(sogou_items)
-        if not sogou_items:
-            print("  [WARN] 微信公众号搜狗结果为空（可能被反爬/网络限制）")
-
-    # 3) Bing 站内搜索兜底
-    if WECHAT_ENABLE_BING:
-        bing_items = _fetch_bing_wechat_search(
-            source_name=source,
-            queries=sogou_queries,
-            max_items=18,
-            timeout=LISTING_FETCH_TIMEOUT,
-        )
-        items.extend(bing_items)
-        stats["bing"] = len(bing_items)
-        if not bing_items:
-            print("  [WARN] 微信公众号Bing结果为空（可能区域网络限制）")
-
-    # 4) Google News 仅保留为可选兜底
-    if WECHAT_ENABLE_GOOGLE_NEWS:
-        google_items = _fetch_google_news_site(
-            "mp.weixin.qq.com",
-            source_name=source,
-            extra_queries=wechat_queries[: max(18, VIDEO_QUERY_LIMIT + 8)],
-            max_entries=20,
-        )
-        items.extend(google_items)
-        stats["google"] = len(google_items)
-        if not google_items:
-            print("  [WARN] 微信公众号Google News结果为空")
-
-    # 5) RSSHub 默认关闭，仅在手动开启时尝试
-    if WECHAT_ENABLE_RSSHUB:
-        if priority_accounts:
-            rsshub_priority_items = _fetch_rsshub_wechat_accounts(
-                source_name=source,
-                account_names=priority_accounts[:8],
-                max_entries=20,
-            )
-            items.extend(rsshub_priority_items)
-            stats["rsshub"] += len(rsshub_priority_items)
-        if other_accounts:
-            rsshub_other_items = _fetch_rsshub_wechat_accounts(
-                source_name=source,
-                account_names=other_accounts[:8],
-                max_entries=12,
-            )
-            items.extend(rsshub_other_items)
-            stats["rsshub"] += len(rsshub_other_items)
-
-    # 6) 快速模式下抓空时，自动做一轮慢速重试，减少“全0”概率
-    if not items and FAST_FETCH_MODE:
-        retry_timeout = max(12, LISTING_FETCH_TIMEOUT + 6)
-        print(f"  [INFO] 微信公众号进入慢速重试（timeout={retry_timeout}s）...")
-        if WECHAT_ENABLE_SOGOU:
-            retry_sogou = _fetch_sogou_wechat_search(
-                source_name=source,
-                queries=sogou_queries,
-                max_items=24,
-                timeout=retry_timeout,
-            )
-            items.extend(retry_sogou)
-            stats["sogou"] += len(retry_sogou)
-        if WECHAT_ENABLE_BING:
-            retry_bing = _fetch_bing_wechat_search(
-                source_name=source,
-                queries=sogou_queries,
-                max_items=24,
-                timeout=retry_timeout,
-            )
-            items.extend(retry_bing)
-            stats["bing"] += len(retry_bing)
-        if WECHAT_ENABLE_GOOGLE_NEWS:
-            retry_google = _fetch_google_news_site(
-                "mp.weixin.qq.com",
-                source_name=source,
-                extra_queries=wechat_queries[: max(20, VIDEO_QUERY_LIMIT + 10)],
-                max_entries=24,
-            )
-            items.extend(retry_google)
-            stats["google"] += len(retry_google)
 
     dedup = []
     seen = set()
@@ -2087,7 +1944,7 @@ def fetch_wechat_articles():
         if "mp.weixin.qq.com" not in url:
             continue
 
-        page_date = extract_page_published_date(url)
+        page_date = "" if it.get("date") else extract_page_published_date(url)
         effective_date = page_date or it.get("date", "")
         if page_date:
             it["date"] = page_date
@@ -2117,11 +1974,11 @@ def fetch_wechat_articles():
 
     print(
         f"      [B.5] 微信公众号文章完成: {len(dedup)} 条 "
-        f"(raw={stats['raw']}, WeRSS={stats['werss']}, 搜狗={stats['sogou']}, Bing={stats['bing']}, Google={stats['google']}, RSSHub={stats['rsshub']}, "
-        f"优先号={stats['priority']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})"
+        f"(raw={stats['raw']}, WeRSS={stats['werss']}, 优先号={stats['priority']}, "
+        f"日期过滤={stats['date']}, 关键词过滤={stats['keyword']})"
     )
     if stats["raw"] == 0:
-        print("  [WARN] 微信公众号候选为 0：请优先检查本地 WeRSS 登录/订阅状态；公网搜狗/Bing/Google/RSSHub 可能也有限制。")
+        print("  [WARN] 微信公众号候选为 0：请检查本地 WeRSS 服务、后台账号登录和微信扫码授权状态。")
     tracker.record(source, dedup)
     return dedup
 
@@ -2568,7 +2425,10 @@ def is_high_value_audio_example(item):
     return bool(re.search(
         r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音)"
         r"|音频.{0,20}(AI|智能体|大模型).{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
-        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
+        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战|体验|实测|可用)"
+        r"|AI音乐.{0,30}(社区|写歌|创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI.{0,12}(配乐|配音|音效|声音|音乐).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
         r"|配音.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
         r"|播客.{0,20}(工作流|创作|应用|案例|工具|教程|实战)",
         text,
@@ -3177,7 +3037,7 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
             print("  [WARN] WeRSS 自动订阅跳过：后台登录失败，请检查 WERSS_USERNAME/WERSS_PASSWORD")
         sqlite_items = _fetch_wechat_from_werss_sqlite(
             source_name=source_name,
-            feed_ids=target_feed_ids,
+            feed_ids=None,
             max_items=max_items,
         )
         for it in sqlite_items:
@@ -3945,8 +3805,9 @@ def wechat_keyword_gate(item):
     account_hint = get_wechat_account_hint(item)
     account_name = str(item.get("account_name", "")).strip()
     is_priority = bool(item.get("is_priority_wechat")) or bool(account_hint) or (account_name in WECHAT_PRIORITY_ACCOUNTS)
+    experience_hit = bool(PRACTICAL_EXPERIENCE_SIGNAL.search(support_text))
 
-    if EXCLUDE_PATTERN.search(support_text):
+    if EXCLUDE_PATTERN.search(support_text) and not experience_hit:
         return False
     if is_non_actionable_page(item):
         return False
@@ -3962,7 +3823,7 @@ def wechat_keyword_gate(item):
     application_hit = bool(APPLICATION_SIGNAL.search(support_text) or ORDINARY_HINT_PATTERN.search(support_text))
     audio_hit = is_audio_special_item(item)
 
-    if practice_hit:
+    if practice_hit or experience_hit:
         return True
     if is_priority and (application_hit or model_or_innovation_hit or audio_hit):
         return True
