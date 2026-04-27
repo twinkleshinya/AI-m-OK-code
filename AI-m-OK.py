@@ -114,6 +114,7 @@ PRODUCT_HEAT_THRESHOLD = 90
 FEISHU_TOP_N = 15
 FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
 MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "3"))
+REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "18"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -258,6 +259,7 @@ FAST_FETCH_MODE = os.environ.get("FAST_FETCH_MODE", "1").strip().lower() not in 
 REQUEST_RETRIES = int(os.environ.get("REQUEST_RETRIES", "1" if FAST_FETCH_MODE else "2"))
 RSS_FETCH_TIMEOUT = int(os.environ.get("RSS_FETCH_TIMEOUT", "6" if FAST_FETCH_MODE else "12"))
 LISTING_FETCH_TIMEOUT = int(os.environ.get("LISTING_FETCH_TIMEOUT", "6" if FAST_FETCH_MODE else "12"))
+GOOGLE_NEWS_RSS_TIMEOUT = int(os.environ.get("GOOGLE_NEWS_RSS_TIMEOUT", str(max(12, RSS_FETCH_TIMEOUT + 6))))
 LISTING_PAGE_LIMIT = int(os.environ.get("LISTING_PAGE_LIMIT", "5" if FAST_FETCH_MODE else "12"))
 LISTING_ITEMS_PER_PAGE = int(os.environ.get("LISTING_ITEMS_PER_PAGE", "2" if FAST_FETCH_MODE else "4"))
 GOOGLE_NEWS_QUERY_LIMIT = int(os.environ.get("GOOGLE_NEWS_QUERY_LIMIT", "4" if FAST_FETCH_MODE else str(VIDEO_QUERY_LIMIT)))
@@ -3998,10 +4000,12 @@ def warmup_sina_homepage():
 def parse_rss_feed(url, source_name, max_entries=20, ai_filter=False):
     items = []
     try:
+        is_google_news = "news.google.com/" in str(url or "")
         feed_resp = safe_request(
             url,
-            timeout=RSS_FETCH_TIMEOUT,
+            timeout=GOOGLE_NEWS_RSS_TIMEOUT if is_google_news else RSS_FETCH_TIMEOUT,
             headers={"Accept": "application/rss+xml, application/xml, text/xml, */*"},
+            trust_env=False if is_google_news else True,
         )
         feed = feedparser.parse(feed_resp.content if feed_resp is not None else url)
         for entry in feed.entries[:max_entries]:
@@ -5946,7 +5950,7 @@ def calculate_heat_score(item):
 
     return heat
 
-def deduplicate_and_rank(all_items):
+def deduplicate_and_rank(all_items, review_mode=False):
     items = quality_filter(all_items)
     feedback_profile = build_feedback_profile()
     feedback_filtered_count = 0
@@ -6074,6 +6078,11 @@ def deduplicate_and_rank(all_items):
         seen_titles.append(title)
         deduped.append(item)
 
+    if review_mode:
+        limit = max(REVIEW_CANDIDATE_MAX, MIN_ITEMS)
+        review_candidates = deduped[:limit]
+        print(f"      [v3.9] 审核候选池: {len(review_candidates)} 条")
+        return review_candidates
     return enforce_diversity_with_pool(deduped)
 
 def enforce_diversity(items):
@@ -7332,8 +7341,10 @@ def main():
 
     quality_passed_items = quality_filter([dict(it) for it in all_items])
     final = deduplicate_and_rank(all_items)
+    review_seed_items = deduplicate_and_rank(all_items, review_mode=True)
     audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
     audio_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items])
+    audio_review_seed = deduplicate_and_rank(audio_review_pool, review_mode=True) if audio_review_pool else []
     audio_injected = []
     final_urls = {
         str(it.get("url", "")).rstrip("/")
@@ -7360,16 +7371,39 @@ def main():
         return
 
     print(f"\n✍️  [Phase F] Generating Chinese summaries (v3.3 正文/字幕抽取 + 反幻觉 + 实用导向)...")
-    final = generate_chinese_summaries(final)
-    final = filter_inaccessible_items(final)
-    audio_special_pool = select_audio_special_items([dict(it) for it in final])
-    audio_review_pool = select_audio_review_candidates([dict(it) for it in final])
+    review_candidates = [dict(item) for item in review_seed_items]
+    review_urls = {
+        str(it.get("url", "")).rstrip("/")
+        for it in review_candidates
+        if it.get("url")
+    }
+    for item in audio_review_seed:
+        url = str(item.get("url", "")).rstrip("/")
+        if not url or url in review_urls:
+            continue
+        review_candidates.append(dict(item))
+        review_urls.add(url)
+        if sum(1 for it in review_candidates if is_audio_special_item(it)) >= max(MIN_AUDIO_REVIEW_CHOICES, 3):
+            break
+
+    review_candidates = generate_chinese_summaries(review_candidates)
+    review_candidates = filter_inaccessible_items(review_candidates)
+    final_urls_after_summary = {
+        str(it.get("url", "")).rstrip("/")
+        for it in final
+        if it.get("url")
+    }
+    final = [
+        it for it in review_candidates
+        if str(it.get("url", "")).rstrip("/") in final_urls_after_summary
+    ]
+    audio_special_pool = select_audio_special_items([dict(it) for it in review_candidates])
+    audio_review_pool = select_audio_review_candidates([dict(it) for it in review_candidates])
     audio_review_urls = {
         str(item.get("url", "")).rstrip("/")
         for item in audio_review_pool
         if item.get("url")
     }
-    review_candidates = [dict(item) for item in final]
 
      # ══════════════════════════════════════════════════════════════
     # ★ 人工审核为飞书推送前的硬约束
