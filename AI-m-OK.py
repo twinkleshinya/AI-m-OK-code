@@ -1057,6 +1057,9 @@ def history_keys_from_item(item):
     event_fp = extract_event_fingerprint(item)
     if event_fp:
         keys.add(f"event::{event_fp}")
+    product_key = extract_product_dedup_key(item)
+    if product_key:
+        keys.add(product_key)
     return keys
 
 
@@ -5497,6 +5500,123 @@ def extract_event_fingerprint(item):
     return "|".join(parts[:8])
 
 
+def _normalize_product_version(version):
+    text = str(version or "").strip().lower()
+    text = re.sub(r"[\s_]+", "-", text)
+    text = re.sub(r"^version-", "v", text)
+    text = re.sub(r"^v(?=\d)", "v", text)
+    text = text.strip("-")
+    return text
+
+
+def extract_product_dedup_key(item):
+    """
+    同产品/同模型硬去重键。
+    目标是把 DeepSeek V4、Qwen3.6-27B、HappyHorse 1.0、ACE Studio 2.0
+    这类明确产品名压成同一个键，只保留热度和信息完整度最高的一条。
+    """
+    title = item.get("title_zh") or item.get("title") or ""
+    if not title:
+        return ""
+    raw_text = str(title or "").lower()
+    text = normalize_title_key(title)
+    search_text = f"{raw_text} {text}"
+
+    product_patterns = [
+        ("deepseek", r"(?<![a-z0-9])deepseek(?![a-z0-9])|深度求索"),
+        ("qwen", r"(?<![a-z0-9])qwen(?=\d|[^a-z0-9]|$)|通义千问|通义"),
+        ("kimi", r"(?<![a-z0-9])kimi(?![a-z0-9])"),
+        ("doubao", r"豆包|(?<![a-z0-9])doubao(?![a-z0-9])"),
+        ("glm", r"(?<![a-z0-9])glm(?![a-z0-9])|智谱"),
+        ("ernie", r"文心|ernie"),
+        ("gpt", r"(?<![a-z0-9])gpt(?=\d|[^a-z0-9]|$)|openai"),
+        ("claude", r"(?<![a-z0-9])claude(?![a-z0-9])"),
+        ("gemini", r"(?<![a-z0-9])gemini(?![a-z0-9])"),
+        ("llama", r"(?<![a-z0-9])llama(?![a-z0-9])"),
+        ("mistral", r"(?<![a-z0-9])mistral(?![a-z0-9])"),
+        ("happyhorse", r"(?<![a-z0-9])happyhorse(?![a-z0-9])|欢乐马|快乐小马"),
+        ("ace-studio", r"(?<![a-z0-9])ace\s*studio(?![a-z0-9])"),
+        ("vibevoice", r"(?<![a-z0-9])vibevoice(?![a-z0-9])"),
+        ("magic-tts", r"(?<![a-z0-9])magic[-\s]?tts(?![a-z0-9])"),
+        ("moss-tts", r"(?<![a-z0-9])moss[-\s]?tts(?![a-z0-9])"),
+        ("step-audio", r"(?<![a-z0-9])step\s*audio(?![a-z0-9])"),
+        ("audio-cogito", r"(?<![a-z0-9])audio[-\s]?cogito(?![a-z0-9])"),
+        ("audio-omni", r"(?<![a-z0-9])audio[-\s]?omni(?![a-z0-9])"),
+        ("audio-deepthinker", r"(?<![a-z0-9])audio[-\s]?deepthinker(?![a-z0-9])"),
+        ("suno", r"(?<![a-z0-9])suno(?![a-z0-9])"),
+        ("udio", r"(?<![a-z0-9])udio(?![a-z0-9])"),
+        ("elevenlabs", r"(?<![a-z0-9])elevenlabs(?![a-z0-9])"),
+    ]
+
+    matched = []
+    for label, pattern in product_patterns:
+        if re.search(pattern, search_text, re.IGNORECASE):
+            matched.append(label)
+    if not matched:
+        return ""
+
+    versions = []
+    for pattern in [
+        r"\bv?\d+(?:\.\d+){0,2}(?:[-\s]?(?:pro|flash|max|mini|turbo|lite|preview|thinking|reasoning))?\b",
+        r"\b\d+(?:\.\d+)?[bm]\b",
+        r"\bk\d+\b",
+        r"\br\d+\b",
+        r"百万|100万|1m|long[-\s]?context|超长上下文|长上下文",
+    ]:
+        versions.extend(re.findall(pattern, search_text, re.IGNORECASE))
+
+    normalized_versions = []
+    for version in versions:
+        token = _normalize_product_version(version)
+        if token in {"1m", "100万", "百万", "long-context", "超长上下文", "长上下文"}:
+            token = "long-context"
+        if token and token not in normalized_versions:
+            normalized_versions.append(token)
+
+    # 明确版本时按“产品+版本”去重；没有版本但标题是发布/上线/实测类，也按产品去重。
+    product = matched[0]
+    inline_versions = []
+    inline_version_patterns = {
+        "deepseek": r"deepseek[-\s]?(v\d+(?:\.\d+)?(?:[-\s]?(?:pro|flash|max|mini))?)",
+        "qwen": r"qwen[-\s]?(\d+(?:\.\d+)?(?:[-\s]?\d+[bm])?)",
+        "kimi": r"kimi[-\s]?([kvr]?\d+(?:\.\d+)?)",
+        "doubao": r"doubao[-\s]?(\d+(?:\.\d+)?)",
+        "glm": r"glm[-\s]?(\d+(?:\.\d+)?)",
+        "gpt": r"gpt[-\s]?(\d+(?:\.\d+)?(?:[-\s]?(?:pro|mini|turbo))?)",
+        "claude": r"claude[-\s]?(\d+(?:\.\d+)?|opus|sonnet|haiku)",
+        "gemini": r"gemini[-\s]?(\d+(?:\.\d+)?(?:[-\s]?(?:pro|flash))?)",
+        "happyhorse": r"happyhorse[-\s]?(\d+(?:\.\d+)?)",
+        "ace-studio": r"ace\s*studio[-\s]?(\d+(?:\.\d+)?)",
+        "step-audio": r"step\s*audio[-\s]?(\d+(?:\.\d+)?)",
+    }
+    inline_pat = inline_version_patterns.get(product)
+    if inline_pat:
+        inline_versions.extend(re.findall(inline_pat, raw_text, re.IGNORECASE))
+        if not inline_versions:
+            inline_versions.extend(re.findall(inline_pat, search_text, re.IGNORECASE))
+
+    if inline_versions:
+        normalized_versions = []
+        for version in inline_versions:
+            token = _normalize_product_version(version)
+            if token and token not in normalized_versions:
+                normalized_versions.append(token)
+        return "product::" + product + "::" + "::".join(normalized_versions[:2])
+
+    if normalized_versions:
+        v_versions = [v for v in normalized_versions if re.match(r"v\d", v, re.IGNORECASE)]
+        if v_versions:
+            return "product::" + product + "::" + "::".join(v_versions[:2])
+    if re.search(
+        r"发布|推出|上线|开源|预览|preview|launch|release|announc|实测|体验|测评|评测"
+        r"|指南|教程|实操|进阶|使用|默认模型|缓存|价格|限时|更新|降价|cost|pricing|guide|tutorial",
+        search_text,
+        re.IGNORECASE,
+    ):
+        return "product::" + product
+    return ""
+
+
 def extract_event_root(item):
     event_fp = extract_event_fingerprint(item)
     if not event_fp:
@@ -5505,7 +5625,14 @@ def extract_event_root(item):
 
 
 def _score_for_dedup(item):
-    return float(item.get("heat_score", 0) or 0) + float(item.get("_completeness", 0) or 0) / 100.0
+    heat = float(item.get("heat_score", 0) or 0)
+    completeness = max(0.0, float(item.get("_completeness", 0) or 0))
+    detail_score = min(completeness, 1800.0) / 18.0
+    if item.get("content_excerpt"):
+        detail_score += 12
+    if item.get("summary") and len(str(item.get("summary") or "")) > 80:
+        detail_score += 6
+    return heat + detail_score
 
 
 def _is_release_model_story(item):
@@ -5951,7 +6078,7 @@ def deduplicate_and_rank(all_items, review_mode=False):
         elif item.get("_pool") == "B":
             item["heat_score"] += 4
         # 偏好信息更完整的来源（摘要更长、非聚合跳转）
-        completeness = len((item.get("summary") or "").strip())
+        completeness = len((item.get("summary") or "").strip()) + len((item.get("content_excerpt") or "").strip())
         if "news.google.com" in (item.get("url") or ""):
             completeness -= 80
         if item.get("is_social"):
@@ -5975,6 +6102,7 @@ def deduplicate_and_rank(all_items, review_mode=False):
     seen_titles = []
     seen_fingerprints = {}
     seen_event_fingerprints = {}
+    seen_product_keys = {}
     deduped = []
 
     items.sort(
@@ -5989,6 +6117,7 @@ def deduplicate_and_rank(all_items, review_mode=False):
         title = item.get("title", "")
         fp = extract_content_fingerprint(item)
         event_fp = extract_event_fingerprint(item)
+        product_key = extract_product_dedup_key(item)
         title_key = normalize_title_key(item.get("title_zh") or title)
 
         if not title:
@@ -6002,9 +6131,23 @@ def deduplicate_and_rank(all_items, review_mode=False):
             history_hit = True
         if event_fp and f"event::{event_fp}" in history_keys:
             history_hit = True
+        if product_key and product_key in history_keys:
+            history_hit = True
         if canonical_url in seen_urls or history_hit:
             continue
-        if is_duplicate_title(title, seen_titles):
+
+        product_prev_to_replace = None
+        if product_key:
+            prev = seen_product_keys.get(product_key)
+            if prev is not None:
+                old_score = _score_for_dedup(prev)
+                new_score = _score_for_dedup(item)
+                if new_score > old_score:
+                    product_prev_to_replace = prev
+                else:
+                    continue
+
+        if product_prev_to_replace is None and is_duplicate_title(title, seen_titles):
             continue
 
         similar_prev = None
@@ -6054,6 +6197,13 @@ def deduplicate_and_rank(all_items, review_mode=False):
             else:
                 seen_event_fingerprints[event_fp] = item
 
+        if product_key:
+            if product_prev_to_replace is not None:
+                try:
+                    deduped.remove(product_prev_to_replace)
+                except ValueError:
+                    pass
+            seen_product_keys[product_key] = item
         if canonical_url:
             seen_urls.add(canonical_url)
         seen_titles.append(title)
