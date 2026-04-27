@@ -59,15 +59,26 @@ def print(*args, **kwargs):  # type: ignore[override]
 # 配置区域（建议敏感信息迁移至环境变量）
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _split_webhooks(raw):
+    return [x.strip() for x in str(raw or "").split(",") if x.strip()]
 
-FEISHU_WEBHOOKS = os.environ.get(
+
+FEISHU_WEBHOOKS = _split_webhooks(os.environ.get(
     "FEISHU_WEBHOOKS",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00"
-).split(",")
-REVIEW_NOTIFY_WEBHOOKS = os.environ.get(
-    "REVIEW_NOTIFY_WEBHOOKS",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/01c129a5-baa4-400d-a980-9138d5d7168d",
-).split(",")
+    "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
+))
+REVIEW_NOTIFY_TARGET_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/01c129a5-baa4-400d-a980-9138d5d7168d"
+REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
+    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
+    *FEISHU_WEBHOOKS,
+}
+REVIEW_NOTIFY_WEBHOOKS = [
+    webhook
+    for webhook in _split_webhooks(os.environ.get("REVIEW_NOTIFY_WEBHOOKS", REVIEW_NOTIFY_TARGET_WEBHOOK))
+    if webhook == REVIEW_NOTIFY_TARGET_WEBHOOK and webhook not in REVIEW_NOTIFY_BLOCKED_WEBHOOKS
+]
+if not REVIEW_NOTIFY_WEBHOOKS:
+    REVIEW_NOTIFY_WEBHOOKS = [REVIEW_NOTIFY_TARGET_WEBHOOK]
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
