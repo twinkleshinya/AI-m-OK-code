@@ -6910,8 +6910,6 @@ def is_item_link_accessible(item):
             allow_redirects=True,
             headers={"User-Agent": DEFAULT_HEADERS["User-Agent"]},
         )
-        if resp.status_code >= 400:
-            return False
         body = (resp.text or "")[:4000]
         if re.search(
             r"内容已被发布者删除|此内容因违规无法查看|该公众号已迁移|链接无法访问|内容已删除|此内容已不可见",
@@ -6921,7 +6919,8 @@ def is_item_link_accessible(item):
             return False
         return True
     except Exception:
-        return False
+        # 微信文章很容易因为反爬、代理或本机网络被误判；审核前只拦截明确删除/不可见的页面。
+        return True
 
 
 def filter_inaccessible_items(items):
@@ -6933,7 +6932,7 @@ def filter_inaccessible_items(items):
             continue
         kept.append(item)
     if filtered_count:
-        print(f"      [v3.7] 链接不可访问过滤: {filtered_count} 条")
+        print(f"      [v3.7] 明确不可访问链接过滤: {filtered_count} 条")
     return kept
 
 
