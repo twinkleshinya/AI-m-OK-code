@@ -72,13 +72,7 @@ REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
     *FEISHU_WEBHOOKS,
 }
-REVIEW_NOTIFY_WEBHOOKS = [
-    webhook
-    for webhook in _split_webhooks(os.environ.get("REVIEW_NOTIFY_WEBHOOKS", REVIEW_NOTIFY_TARGET_WEBHOOK))
-    if webhook == REVIEW_NOTIFY_TARGET_WEBHOOK and webhook not in REVIEW_NOTIFY_BLOCKED_WEBHOOKS
-]
-if not REVIEW_NOTIFY_WEBHOOKS:
-    REVIEW_NOTIFY_WEBHOOKS = [REVIEW_NOTIFY_TARGET_WEBHOOK]
+REVIEW_NOTIFY_WEBHOOKS = []
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -7144,19 +7138,8 @@ def push_feishu(payload):
 
 
 def push_review_link_to_feishu(review_url, total_count, audio_count):
-    payload = {
-        "msg_type": "text",
-        "content": {
-            "text": (
-                f"AI'm OK 审核页已生成\n"
-                f"链接：{review_url}\n"
-                f"待审条目：{total_count} 条\n"
-                f"AI音频候选：{audio_count} 条\n"
-                f"说明：未完成人工审核，不会推送到飞书群。"
-            )
-        },
-    }
-    return push_feishu_to_webhooks(payload, REVIEW_NOTIFY_WEBHOOKS, "审核提醒")
+    print(f"      审核页仅本地打开，不发送飞书提醒: {review_url}")
+    return False
 
 def publish_to_pages(html_content, date_str):
     try:
@@ -7427,15 +7410,6 @@ def main():
             get_source_info_func=get_source_info,
             port=18088,
             audio_item_urls=audio_review_urls,
-            on_ready=lambda review_url, review_items: push_review_link_to_feishu(
-                review_url=review_url,
-                total_count=len(review_items),
-                audio_count=sum(
-                    1
-                    for it in review_items
-                    if str(it.get("url", "")).rstrip("/") in audio_review_urls
-                ),
-            ),
         )
         if not final:
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
