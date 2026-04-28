@@ -63,10 +63,28 @@ def _split_webhooks(raw):
     return [x.strip() for x in str(raw or "").split(",") if x.strip()]
 
 
-FEISHU_WEBHOOKS = _split_webhooks(os.environ.get(
-    "FEISHU_WEBHOOKS",
+def _unique_webhooks(webhooks):
+    seen = set()
+    result = []
+    for hook in webhooks:
+        hook = str(hook or "").strip()
+        if not hook or hook in seen:
+            continue
+        seen.add(hook)
+        result.append(hook)
+    return result
+
+
+DEFAULT_FEISHU_WEBHOOKS = [
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
-))
+]
+EXTRA_FEISHU_WEBHOOKS = [
+    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
+]
+FEISHU_WEBHOOKS = _unique_webhooks(
+    _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", ",".join(DEFAULT_FEISHU_WEBHOOKS)))
+    + EXTRA_FEISHU_WEBHOOKS
+)
 REVIEW_NOTIFY_TARGET_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/01c129a5-baa4-400d-a980-9138d5d7168d"
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
