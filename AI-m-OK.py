@@ -358,6 +358,11 @@ WERSS_PASSWORD = os.environ.get(
     os.environ.get("WE_MP_RSS_PASSWORD", WERSS_LOCAL_ENV.get("WERSS_PASSWORD", WERSS_LOCAL_ENV.get("PASSWORD", ""))),
 ).strip()
 WERSS_TOKEN = os.environ.get("WERSS_TOKEN", os.environ.get("WE_MP_RSS_TOKEN", "")).strip()
+WERSS_AUTO_START = os.environ.get("WERSS_AUTO_START", "1").strip().lower() in {"1", "true", "yes"}
+_werss_env_dir = Path(_werss_env_path).parent if WERSS_LOCAL_ENV and _werss_env_path else Path(r"E:\jiangxy2\werss")
+WERSS_DIR = Path(os.environ.get("WERSS_DIR", str(_werss_env_dir)))
+WERSS_PYTHON = Path(os.environ.get("WERSS_PYTHON", str(WERSS_DIR / ".venv" / "Scripts" / "python.exe")))
+WERSS_MAIN = Path(os.environ.get("WERSS_MAIN", str(WERSS_DIR / "main.py")))
 WERSS_FETCH_LIMIT = int(os.environ.get("WERSS_FETCH_LIMIT", "0"))
 WERSS_AUTO_SUBSCRIBE = os.environ.get("WERSS_AUTO_SUBSCRIBE", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_AUTOSUBSCRIBE_LIMIT = int(os.environ.get("WERSS_AUTOSUBSCRIBE_LIMIT", str(len(WECHAT_OFFICIAL_ACCOUNTS))))
@@ -2590,6 +2595,67 @@ def _deep_fix_mojibake(obj):
     return obj
 
 
+_WERSS_START_ATTEMPTED = False
+
+
+def _is_local_werss_base(base):
+    try:
+        host = (urlparse(base).hostname or "").lower()
+        return host in {"127.0.0.1", "localhost", "::1"}
+    except Exception:
+        return False
+
+
+def _werss_service_responding(base, timeout=3):
+    try:
+        with requests.Session() as session:
+            session.trust_env = False
+            resp = session.get(base.rstrip("/") + "/", timeout=timeout, headers={"Accept": "text/html,application/json"})
+        return resp.status_code < 500
+    except Exception:
+        return False
+
+
+def _start_werss_service(base):
+    global _WERSS_START_ATTEMPTED
+    if _werss_service_responding(base):
+        return True
+    if not WERSS_AUTO_START or not _is_local_werss_base(base):
+        return False
+    if _WERSS_START_ATTEMPTED:
+        return _werss_service_responding(base, timeout=2)
+    _WERSS_START_ATTEMPTED = True
+
+    if not WERSS_MAIN.exists():
+        print(f"  [WARN] WeRSS 自动启动失败：找不到 {WERSS_MAIN}")
+        return False
+    python_exe = WERSS_PYTHON if WERSS_PYTHON.exists() else Path(sys.executable)
+    try:
+        creationflags = 0
+        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creationflags = subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(
+            [str(python_exe), str(WERSS_MAIN)],
+            cwd=str(WERSS_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        print(f"      [B.5] WeRSS 服务未运行，已自动启动: {base}")
+    except Exception as e:
+        print(f"  [WARN] WeRSS 自动启动失败: {e}")
+        return False
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if _werss_service_responding(base, timeout=2):
+            return True
+        time.sleep(1)
+    print("  [WARN] WeRSS 自动启动后仍未响应，请手动检查服务窗口/日志")
+    return False
+
+
 def _werss_request_json(base, path, token="", method="GET", timeout=None, json_body=None, data=None):
     url = f"{base.rstrip('/')}/{path.lstrip('/')}"
     headers = {
@@ -2620,6 +2686,8 @@ def _werss_request_json(base, path, token="", method="GET", timeout=None, json_b
 
 
 def _werss_login(base):
+    if not _start_werss_service(base):
+        return ""
     if WERSS_TOKEN:
         return WERSS_TOKEN
     if not WERSS_USERNAME or not WERSS_PASSWORD:
@@ -2652,6 +2720,14 @@ def _werss_login(base):
         except Exception:
             continue
     return ""
+
+
+def _werss_wx_status(base, token):
+    data = _werss_request_json(base, "/api/v1/wx/sys/info", token=token, timeout=max(8, LISTING_FETCH_TIMEOUT))
+    wx = (((data or {}).get("data") or {}).get("wx") or {})
+    if not isinstance(wx, dict):
+        return {}
+    return wx
 
 
 def _iter_werss_records(data, depth=0):
@@ -3148,6 +3224,14 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
         token = _werss_login(base)
         target_feed_ids = []
         if token:
+            wx_status = _werss_wx_status(base, token)
+            if wx_status:
+                if wx_status.get("login") is False:
+                    print("  [WARN] WeRSS 后台已登录，但微信公众号授权失效：需要在 WeRSS 页面重新扫码微信账号")
+                elif wx_status.get("login") is True:
+                    expiry = wx_status.get("expiry_time") or ""
+                    if expiry:
+                        print(f"      [B.5] WeRSS 微信授权有效，预计过期: {expiry}")
             sub_stats = _ensure_werss_ai_subscriptions(base, token)
             if sub_stats["checked"]:
                 print(
