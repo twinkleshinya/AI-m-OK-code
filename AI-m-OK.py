@@ -147,6 +147,7 @@ REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 WECHAT_AUDIO_SOURCE_WEIGHT = int(os.environ.get("WECHAT_AUDIO_SOURCE_WEIGHT", "96"))
+MIN_AUDIO_DISCOVERY_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_DISCOVERY_REVIEW_CHOICES", "12"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -219,6 +220,16 @@ AUDIO_CREATOR_FEEDS = [
     "https://musictech.com/feed/",
     "https://www.soundonsound.com/feed/",
     "https://blog.native-instruments.com/feed/",
+]
+
+AI_AUDIO_DISCOVERY_FEEDS = [
+    "https://elevenlabs.io/blog/rss.xml",
+    "https://www.descript.com/blog/rss.xml",
+    "https://cdm.link/feed/",
+    "https://musictech.com/feed/",
+    "https://www.soundonsound.com/feed/",
+    "https://blog.native-instruments.com/feed/",
+    "https://developer.nvidia.com/blog/feed/",
 ]
 
 WECHAT_SOURCE_NAME = "微信公众号"
@@ -334,6 +345,26 @@ AUDIO_CREATOR_PAGES = [
     "https://developer.nvidia.com/blog",
 ]
 
+AI_AUDIO_DISCOVERY_PAGES = [
+    "https://elevenlabs.io/blog",
+    "https://www.descript.com/blog",
+    "https://suno.com/blog",
+    "https://udio.com/blog",
+    "https://www.audiokinetic.com/en/blog/",
+    "https://www.reaper.fm/news.php",
+    "https://www.steinberg.net/news/",
+    "https://www.izotope.com/en/learn.html",
+    "https://blog.native-instruments.com/",
+    "https://www.ableton.com/en/blog/",
+    "https://www.soundonsound.com/techniques",
+    "https://musictech.com/tutorials/",
+    "https://cdm.link/tag/ai/",
+    "https://www.kvraudio.com/news",
+    "https://www.production-expert.com/production-expert-1",
+    "https://www.audiopluginguy.com/",
+    "https://www.attackmagazine.com/technique/",
+]
+
 NITTER_BASES = [
     x.strip().rstrip("/")
     for x in os.environ.get(
@@ -366,6 +397,7 @@ PRACTICAL_DOMAIN_LIMIT = int(os.environ.get("PRACTICAL_DOMAIN_LIMIT", "5" if FAS
 AGENT_DOMAIN_LIMIT = int(os.environ.get("AGENT_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "10"))
 AUDIO_CREATOR_DOMAIN_LIMIT = int(os.environ.get("AUDIO_CREATOR_DOMAIN_LIMIT", "10" if FAST_FETCH_MODE else "14"))
 AUDIO_MUSIC_DOMAIN_LIMIT = int(os.environ.get("AUDIO_MUSIC_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "8"))
+AI_AUDIO_DISCOVERY_DOMAIN_LIMIT = int(os.environ.get("AI_AUDIO_DISCOVERY_DOMAIN_LIMIT", "12" if FAST_FETCH_MODE else "18"))
 FRONTIER_DOMAIN_LIMIT = int(os.environ.get("FRONTIER_DOMAIN_LIMIT", "6" if FAST_FETCH_MODE else "11"))
 DEEP_PAGE_DATE_IN_LISTING = os.environ.get("DEEP_PAGE_DATE_IN_LISTING", "0").strip().lower() in {"1", "true", "yes"}
 WECHAT_SEARCH_QUERY_LIMIT = int(os.environ.get("WECHAT_SEARCH_QUERY_LIMIT", "8" if FAST_FETCH_MODE else "16"))
@@ -848,6 +880,31 @@ AUDIO_MUSIC_GAME_QUERIES = [
     "game AI tool tutorial",
 ]
 
+AI_AUDIO_DISCOVERY_QUERIES = [
+    "AI audio",
+    "AI music",
+    "voice AI",
+    "speech model",
+    "TTS ASR voice agent",
+    "AI sound design",
+    "AI music production",
+    "AI mixing mastering plugin",
+    "AI DAW VST MIDI",
+    "REAPER AI",
+    "Wwise AI",
+    "CRIWARE AI",
+    "Logic Pro AI",
+    "Cubase AI",
+    "AI配音",
+    "AI音频",
+    "AI音乐",
+    "AI编曲",
+    "AI混音",
+    "AI音效",
+    "全双工语音",
+    "语音交互 AI",
+]
+
 ORDINARY_HINT_TERMS = [
     r"AI\s*skill", r"AI\s*skills", r"AI\s*agent", r"AI\s*tutorial",
     r"AI\s*tool", r"AI\s*tools", r"AI\s*workflow", r"AI\s*automation",
@@ -980,6 +1037,7 @@ SOURCE_REGISTRY = {
     "Practical Guides": {"type": "intl", "display": "Practical Guides", "icon": "🛠️"},
     "Agent/Coding AI":  {"type": "intl", "display": "Agent/Coding AI",  "icon": "🤖"},
     "Audio Creator AI": {"type": "intl", "display": "Audio Creator AI", "icon": "🎵"},
+    "AI Audio Discovery": {"type": "intl", "display": "AI Audio Discovery", "icon": "🎧"},
     "AI Frontier":      {"type": "intl", "display": "AI Frontier",      "icon": "🧪"},
     "YouTube":          {"type": "intl", "display": "YouTube",          "icon": "📺"},
     "B站":               {"type": "domestic", "display": "B站",           "icon": "📺"},
@@ -1010,6 +1068,7 @@ SOURCE_WEIGHT = {
     "Practical Guides": 95,
     "Agent/Coding AI": 96,
     "Audio Creator AI": 94,
+    "AI Audio Discovery": 92,
     "AI Frontier": 93,
     "YouTube": 78,
     "B站": 80,
@@ -2054,6 +2113,84 @@ def fetch_audio_creator_guides():
         dedup.append(it)
 
     print(f"      [B.5] 音频/音乐/游戏创作源完成: {len(dedup)} 条 (raw={stats['raw']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})")
+    tracker.record(source, dedup)
+    return dedup
+
+
+def audio_discovery_gate(item):
+    if is_business_finance_noise(item) or is_security_or_hype_noise(item) or is_audio_promo_or_training_ad(item):
+        return False
+    text = build_item_filter_text(item, include_query=True)
+    has_ai = bool(AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|artificial intelligence|generative", text, re.IGNORECASE))
+    has_audio = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item) or audio_relevance_score(item) >= 2)
+    return has_ai and has_audio
+
+
+def fetch_ai_audio_discovery_sources():
+    source = "AI Audio Discovery"
+    items = []
+    stats = {"raw": 0, "date": 0, "keyword": 0}
+    print("      [B.5] AI音频探索源抓取中...")
+
+    items.extend(_fetch_custom_curated_candidates(source, AI_AUDIO_DISCOVERY_FEEDS, AI_AUDIO_DISCOVERY_PAGES, max_entries=28))
+    discovery_domains = [
+        "elevenlabs.io",
+        "suno.com",
+        "udio.com",
+        "descript.com",
+        "audiokinetic.com",
+        "reaper.fm",
+        "steinberg.net",
+        "izotope.com",
+        "soundonsound.com",
+        "musictech.com",
+        "cdm.link",
+        "kvraudio.com",
+        "production-expert.com",
+        "native-instruments.com",
+        "ableton.com",
+        "developer.nvidia.com",
+        "replicate.com",
+        "huggingface.co",
+    ]
+    for dom in discovery_domains[:AI_AUDIO_DISCOVERY_DOMAIN_LIMIT]:
+        items.extend(
+            _fetch_google_news_site(
+                dom,
+                source_name=source,
+                extra_queries=AI_AUDIO_DISCOVERY_QUERIES[:max(GOOGLE_NEWS_QUERY_LIMIT, 6)],
+                max_entries=4,
+            )
+        )
+
+    for query in AI_AUDIO_DISCOVERY_QUERIES[:max(GOOGLE_NEWS_QUERY_LIMIT, 8)]:
+        items.extend(
+            parse_rss_feed_candidates(
+                [build_google_news_rss(query)],
+                source_name=source,
+                max_entries=4,
+                ai_filter=False,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    stats["raw"] = len(items)
+    for it in items:
+        url = it.get("url", "").rstrip("/")
+        if not url or url in seen:
+            continue
+        if not is_within_days(it.get("date"), 30):
+            stats["date"] += 1
+            continue
+        if not audio_discovery_gate(it):
+            stats["keyword"] += 1
+            continue
+        it["_audio_discovery"] = True
+        seen.add(url)
+        dedup.append(it)
+
+    print(f"      [B.5] AI音频探索源完成: {len(dedup)} 条 (raw={stats['raw']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})")
     tracker.record(source, dedup)
     return dedup
 
@@ -6126,7 +6263,7 @@ def audio_relevance_score(item):
     for pat in practical_terms:
         if re.search(pat, text, re.IGNORECASE):
             score += 1
-    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI"}:
+    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI", "AI Audio Discovery"}:
         score += 3
     if item.get("is_video"):
         score += 1
@@ -6221,7 +6358,7 @@ def is_practical_candidate(item):
 
 def allowed_item_age_hours(item):
     source = item.get("source", "")
-    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
+    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "AI Audio Discovery", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
         return 24 * 7
     if item.get("is_video"):
         platform = str(item.get("platform", "")).lower()
@@ -6371,7 +6508,7 @@ def quality_filter(items):
             dynamic_threshold = PRACTICAL_MIN_SCORE
             if frontier_innovation_gate(item):
                 dynamic_threshold = max(1, PRACTICAL_MIN_SCORE - 1)
-            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials", WECHAT_SOURCE_NAME}:
+            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "AI Audio Discovery", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials", WECHAT_SOURCE_NAME}:
                 dynamic_threshold = max(1, dynamic_threshold - 1)
             if item_pool == "B":
                 dynamic_threshold = max(1, dynamic_threshold - 1)
@@ -7023,7 +7160,7 @@ def is_ai_special_tab_item(item):
         return True
     if source in {
         "Practical Guides", "Agent/Coding AI", "Audio Creator AI",
-        "Audio/Music/Game AI", "AI Frontier", WECHAT_SOURCE_NAME,
+        "Audio/Music/Game AI", "AI Audio Discovery", "AI Frontier", WECHAT_SOURCE_NAME,
     }:
         return True
     if category in {"开源", "技术突破", "应用落地", "研究"}:
@@ -8108,6 +8245,7 @@ def main():
     practical_guides = fetch_practical_guides()
     agent_guides = fetch_agent_coding_guides()
     audio_creator_guides = fetch_audio_creator_guides()
+    audio_discovery_guides = fetch_ai_audio_discovery_sources()
     ai_frontier = fetch_ai_frontier()
 
     print("\n🏮 [Phase C] 国内权威媒体抓取...")
@@ -8135,7 +8273,7 @@ def main():
     all_items = (
         tldr + hn + wired +
         tc + tv + ars + vb + mit + ieee +
-        yt + bz + wx_articles + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + ai_frontier +
+        yt + bz + wx_articles + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + audio_discovery_guides + ai_frontier +
         jqzx + qb + kr + ith + xzy + iq +
         sina + tt + pp +
         supp_intl + supp_domestic
@@ -8147,6 +8285,7 @@ def main():
     review_seed_items = deduplicate_and_rank(all_items, review_mode=True)
     audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
     audio_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items])
+    audio_discovery_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items if it.get("_audio_discovery")])
     audio_review_seed = deduplicate_and_rank(audio_review_pool, review_mode=True) if audio_review_pool else []
     audio_injected = []
     final_urls = {
@@ -8166,6 +8305,7 @@ def main():
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
     print(f"      Audio review pool: {len(audio_review_pool)}")
+    print(f"      Audio discovery review pool: {len(audio_discovery_review_pool)}")
     if audio_injected:
         print(f"      Audio injected for review/push: {len(audio_injected)}")
 
@@ -8189,12 +8329,50 @@ def main():
         if sum(1 for it in review_candidates if is_audio_special_item(it)) >= max(MIN_AUDIO_REVIEW_CHOICES, 3):
             break
 
+    target_audio_choices = max(MIN_AUDIO_REVIEW_CHOICES, MIN_AUDIO_DISCOVERY_REVIEW_CHOICES)
+    audio_backfill_added = 0
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        for item in audio_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        for item in audio_discovery_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
+
     review_candidates = select_source_balanced_items(
         review_candidates,
-        limit=REVIEW_CANDIDATE_MAX,
+        limit=max(REVIEW_CANDIDATE_MAX, target_audio_choices),
         default_max=REVIEW_MAX_PER_SOURCE,
         wechat_max=REVIEW_WECHAT_MAX,
     )
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        review_urls = {
+            str(it.get("url", "")).rstrip("/")
+            for it in review_candidates
+            if it.get("url")
+        }
+        for item in audio_review_pool + audio_discovery_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
     min_visible_audio = min(3, len(audio_review_seed))
     if sum(1 for it in review_candidates if is_audio_special_item(it)) < min_visible_audio:
         review_urls = {
@@ -8210,6 +8388,8 @@ def main():
             review_urls.add(url)
             if sum(1 for it in review_candidates if is_audio_special_item(it)) >= min_visible_audio:
                 break
+    if audio_backfill_added:
+        print(f"      [v4.1] AI音频候选补位: {audio_backfill_added} 条，目标至少 {target_audio_choices} 条")
     print(f"      [v4.0] 审核页来源配比: {source_mix_text(review_candidates)}")
 
     review_candidates = generate_chinese_summaries(review_candidates)
