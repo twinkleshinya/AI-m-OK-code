@@ -142,6 +142,7 @@ REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
 REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
+WECHAT_AUDIO_SOURCE_WEIGHT = int(os.environ.get("WECHAT_AUDIO_SOURCE_WEIGHT", "96"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -5961,6 +5962,22 @@ def audio_relevance_score(item):
     return score
 
 
+def is_wechat_audio_priority_item(item):
+    if item.get("source") != WECHAT_SOURCE_NAME:
+        return False
+    if is_high_value_audio_example(item):
+        return True
+    if not is_audio_special_item(item):
+        return False
+    if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
+        return True
+    return (
+        audio_relevance_score(item) >= 2
+        or audio_editorial_core_hit(item)
+        or audio_editorial_priority(item)
+    )
+
+
 def pool_bucket(item):
     if item.get("_pool"):
         return item["_pool"]
@@ -6221,6 +6238,8 @@ def calculate_heat_score(item):
         heat = base_score
     else:
         heat = SOURCE_WEIGHT.get(source, 50)
+        if is_wechat_audio_priority_item(item):
+            heat = max(heat, WECHAT_AUDIO_SOURCE_WEIGHT)
 
     if TECH_BOOST.search(text):
         heat += 20
@@ -6236,6 +6255,8 @@ def calculate_heat_score(item):
         heat += 22
     if is_high_value_audio_example(item):
         heat += 80
+    if is_wechat_audio_priority_item(item):
+        heat += 18
     if item.get("is_priority_wechat"):
         heat += 20
     if get_wechat_account_hint(item):
