@@ -649,14 +649,15 @@ PRACTICAL_SIGNAL = re.compile(
     r"|skill|skills|skillset|agentic|copilot|n8n|zapier|make\.com|dify|coze|metagpt|langflow|langgraph"
     r"|medrag|kag|trendradar|报表自动化|AI报表|智能客服|客服助手|工作区|workspace"
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
-    r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样",
+    r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
+    r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase",
     re.IGNORECASE,
 )
 
 PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
     r"实测|体验|上手|测评|评测|可用|直接使用|直接进入|入口|面板|创作面板"
     r"|一句指令|一条指令|指令|prompt|提示词|生成|生视频|视频创作|故事板|分镜|运镜"
-    r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音"
+    r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音|旋律|和声|和弦|音符|编曲|效果器"
     r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
     r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
     re.IGNORECASE,
@@ -2546,9 +2547,10 @@ def is_visible_ai_audio_candidate(item):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
-        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音)"
-        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音).{0,12}AI"
+        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase)"
+        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase).{0,12}AI"
         r"|音乐生成|音频生成|语音模型|语音识别|语音合成|文本转语音|转写"
+        r"|AI音乐|AI编曲|AI混音|AI音效|AI旋律|AI和声|AI和弦"
         r"|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-Omni|Audio-Cogito|Audio-DeepThinker"
         r"|ACE Studio|\bSuno\b|\bUdio\b|ElevenLabs|Step Audio|听觉大模型",
         text,
@@ -2562,12 +2564,13 @@ def is_high_value_audio_example(item):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
-        r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音)"
+        r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音|旋律|和声|和弦|音效|编曲|混音|效果器)"
         r"|音频.{0,20}(AI|智能体|大模型).{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
-        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战|体验|实测|可用)"
+        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战|体验|实测|可用|旋律|和声|和弦|编曲|混音)"
         r"|AI音乐.{0,30}(社区|写歌|创作|工具|应用|体验|实测|可用|案例)"
-        r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例|旋律|和声|和弦|编曲)"
         r"|AI.{0,12}(配乐|配音|音效|声音|音乐).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI.{0,12}(旋律|和声|和弦|音符|编曲|混音|效果器|reaper|wwise|criware|logic|cubase).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
         r"|配音.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
         r"|播客.{0,20}(工作流|创作|应用|案例|工具|教程|实战)",
         text,
@@ -3913,7 +3916,7 @@ def is_audio_special_item(item):
     return bool(
         re.search(
             r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft"
-            r"|ai音乐|音乐生成|配乐|音效|audio-omni|vibevoice|ace studio",
+            r"|ai音乐|音乐生成|配乐|音效|旋律|和声|和弦|音符|编曲|效果器|reaper|criware|logic|cubase|audio-omni|vibevoice|ace studio",
             text,
             re.IGNORECASE,
         )
@@ -3925,9 +3928,9 @@ def classify_audio_topic(item):
     rules = [
         (r"播客|podcast|rss|节目", "播客"),
         (r"配音|voice|speech|tts|asr|转写|字幕|语音", "语音"),
-        (r"music|音乐|作曲|soundtrack|suno|udio|audiocraft", "音乐"),
-        (r"game audio|游戏音频|wwise|fmod|unity|unreal|sound design", "游戏音频"),
-        (r"workflow|工作流|automation|agent|plugin|vst|daw|tool|工具|descript|elevenlabs", "工具/工作流"),
+        (r"music|音乐|作曲|旋律|和声|和弦|音符|编曲|soundtrack|suno|udio|audiocraft", "音乐"),
+        (r"game audio|游戏音频|wwise|fmod|criware|unity|unreal|sound design", "游戏音频"),
+        (r"workflow|工作流|automation|agent|plugin|vst|daw|tool|工具|效果器|reaper|logic|cubase|descript|elevenlabs", "工具/工作流"),
     ]
     for pattern, label in rules:
         if re.search(pattern, text, re.IGNORECASE):
@@ -3976,8 +3979,9 @@ def audio_editorial_core_hit(item):
     text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
     return bool(re.search(
         r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
+        r"|旋律|和声|和弦|音符|编曲|混音|母带|效果器"
         r"|文本转语音|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-|ACE Studio|Steinberg|Cubase|Nuendo|SpectraLayers|UAD"
-        r"|\bDAW\b|\bVST\b|Fairlight|voice|speech|audio|sound design|dubbing",
+        r"|\bDAW\b|\bVST\b|\bMIDI\b|REAPER|Wwise|CRIWARE|Logic|Fairlight|voice|speech|audio|sound design|dubbing",
         text,
         re.IGNORECASE,
     ))
@@ -3998,9 +4002,9 @@ def audio_editorial_priority(item):
     if audio_editorial_excluded(item):
         return False
     strong_hit = bool(re.search(
-        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|音频生成|音乐生成|空间音频|实时交互"
+        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|AI\s*音效|AI\s*编曲|AI\s*混音|AI\s*旋律|AI\s*和声|AI\s*和弦|音频生成|音乐生成|空间音频|实时交互"
         r"|实时响应|听觉大模型|音频大模型|音频理解|音频编辑|功能更新|框架|Audio-Omni|Audio-Cogito|Vibe[Vv]oice"
-        r"|SOTA|成本下降|定价骤减|降价|一统|大一统",
+        r"|REAPER|Wwise|CRIWARE|Logic|Cubase|SOTA|成本下降|定价骤减|降价|一统|大一统",
         text,
         re.IGNORECASE,
     ))
@@ -5895,7 +5899,7 @@ def practical_relevance_score(item):
         score += 4
     if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
         score += 2
-    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         score += 2
     if ORDINARY_HINT_PATTERN.search(support_text):
         score += 2
@@ -5940,12 +5944,14 @@ def audio_relevance_score(item):
     strong_terms = [
         r"音频", r"语音", r"voice", r"speech", r"配音", r"dubbing", r"播客", r"podcast",
         r"asr", r"tts", r"转写", r"字幕", r"降噪", r"denoise", r"混音", r"母带",
-        r"music", r"音乐", r"sound design", r"soundtrack", r"game audio", r"游戏音频",
+        r"music", r"音乐", r"旋律", r"和声", r"和弦", r"音效", r"音符", r"编曲",
+        r"sound design", r"soundtrack", r"game audio", r"游戏音频",
     ]
     practical_terms = [
         r"workflow", r"工作流", r"教程", r"实战", r"案例", r"指南", r"部署", r"集成",
         r"plugin", r"vst", r"daw", r"automation", r"agent", r"智能体", r"runway",
-        r"elevenlabs", r"suno", r"descript", r"udio", r"audiocraft",
+        r"elevenlabs", r"suno", r"descript", r"udio", r"audiocraft", r"效果器",
+        r"reaper", r"wwise", r"criware", r"logic", r"cubase", r"midi",
     ]
     for pat in strong_terms:
         if re.search(pat, text, re.IGNORECASE):
@@ -6251,7 +6257,7 @@ def calculate_heat_score(item):
         heat += 25
     if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
         heat += 18
-    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         heat += 22
     if is_high_value_audio_example(item):
         heat += 80
@@ -6787,7 +6793,7 @@ TAG_RULES = [
      "大模型", "tag-llm", "\U0001f916"),
     (re.compile(r"教程|实战|部署|接入|workflow|agent|RAG|自动化|复用|模板|api|sdk|落地|案例", re.I),
      "实用", "tag-product", "\U0001f6e0\ufe0f"),
-    (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|混音|母带|转写", re.I),
+    (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|midi|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", re.I),
      "音频AI", "tag-product", "\U0001f3a7"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
