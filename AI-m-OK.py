@@ -232,7 +232,8 @@ WECHAT_OFFICIAL_ACCOUNTS = [
         "AI工具派,罗斯基,游戏陀螺,美股研究社,加百力,IEEE电气电子工程师学会,Second Sentience,游戏花火,"
         "电子咖啡,游戏茶馆,游戏进化论,游戏研究社,Z Potentials,游戏日报,差评X.PIN,竞核,逛逛GitHub,莫理,尘红,"
         "AI大模型调参指北笔记,绿联NAS私有云,非凡产研,测试工程化,AI音频时代,HsuDan,AI前锋团,钻进盒子里,工具驯兽师,资源设,科技探幽,"
-        "APPSO,冉胖子AI时光机"
+        "APPSO,冉胖子AI时光机,华哥谈AI,模型之声,角落里的AI世界,AI信息Gap,赛博微笔,兔师兄369,"
+        "DeeplearningAI,AI变革指南,聚大模型前言,如此才是,萝卜AI笔记"
     ).split(",")
     if x.strip()
 ]
@@ -252,6 +253,17 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "夕小瑶科技说",
     "APPSO",
     "冉胖子AI时光机",
+    "华哥谈AI",
+    "模型之声",
+    "角落里的AI世界",
+    "AI信息Gap",
+    "赛博微笔",
+    "兔师兄369",
+    "DeeplearningAI",
+    "AI变革指南",
+    "聚大模型前言",
+    "如此才是",
+    "萝卜AI笔记",
 }
 WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "风亭韵律",
@@ -260,6 +272,10 @@ WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "AI音频时代",
     "上和弦",
     "冉胖子AI时光机",
+    "模型之声",
+    "DeeplearningAI",
+    "AI变革指南",
+    "如此才是",
 }
 
 KNOWN_DELETED_URL_TOKENS = {
@@ -272,6 +288,23 @@ KNOWN_LOW_VALUE_URL_TOKENS = {
 HIGH_VALUE_AUDIO_URL_TOKENS = {
     "4TfXl9d0ohiCyBfdVpRB8w",
     "mIvALhN8VU5rhhl63-tcMg",
+    "KjQ-bIxBVRve4ozEhFMbbA",
+    "nJ1ee0SoN5pEp-8QQ7Yarw",
+    "SOcVnJ9SFGMfVwKX_ifHeA",
+    "8KjYfCn0FZMIw64HzuB3kw",
+}
+HIGH_VALUE_PRACTICAL_URL_TOKENS = {
+    "vN7S3V8obJ1dpecp0rYADQ",
+    "KjQ-bIxBVRve4ozEhFMbbA",
+    "_qihWfL7rli3bfwKm9jLfA",
+    "sRiM5cP6QupeOJfXqYq80w",
+    "1iEFUorkp6pRSug2BLQabA",
+    "CpedmQKSQytZ5CeldSq8JA",
+    "nJ1ee0SoN5pEp-8QQ7Yarw",
+    "SOcVnJ9SFGMfVwKX_ifHeA",
+    "GN9uSG__EIk7CYQHCC9tyw",
+    "8KjYfCn0FZMIw64HzuB3kw",
+    "qC2gbQuJy2_yClbmCINUTA",
 }
 
 AUDIO_CREATOR_PAGES = [
@@ -679,7 +712,8 @@ PRACTICAL_SIGNAL = re.compile(
     r"|medrag|kag|trendradar|报表自动化|AI报表|智能客服|客服助手|工作区|workspace"
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
     r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
-    r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase",
+    r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase"
+    r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios",
     re.IGNORECASE,
 )
 
@@ -687,6 +721,7 @@ PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
     r"实测|体验|上手|测评|评测|可用|直接使用|直接进入|入口|面板|创作面板"
     r"|一句指令|一条指令|指令|prompt|提示词|生成|生视频|视频创作|故事板|分镜|运镜"
     r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音|旋律|和声|和弦|音符|编曲|效果器"
+    r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios"
     r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
     r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
     re.IGNORECASE,
@@ -819,6 +854,7 @@ ORDINARY_HINT_TERMS = [
     r"ChatGPT 插件", r"AI工作区", r"智能客服", r"低代码", r"无代码", r"Lynx", r"Apidog",
     r"AI 音频", r"AI 音乐", r"AI 游戏", r"voice AI", r"music AI", r"game AI",
     r"语音生成", r"语音克隆", r"音乐生成", r"游戏开发AI", r"AI编程", r"浏览器AI",
+    r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
 
 REQUIRED_TERMS = [
@@ -828,6 +864,7 @@ REQUIRED_TERMS = [
     r"plugin", r"template", r"best practice", r"playbook", r"技能", r"技巧", r"流程", r"拆解",
     r"实测", r"体验", r"测评", r"评测", r"创作面板", r"一句指令", r"提示词",
     r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
+    r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
 ]
 
@@ -849,6 +886,7 @@ AI_CORE_TERMS = [
     r"AI\s*音频", r"AI\s*音乐", r"AI\s*游戏", r"voice\s*AI", r"music\s*AI", r"game\s*AI",
     r"语音识别", r"语音克隆", r"语音合成", r"AI编程", r"浏览器AI", r"Gemini\s*Skills",
     r"\bASR\b", r"\bTTS\b", r"Veo", r"Sora", r"音频生成", r"音乐生成",
+    r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
 
 PRACTICE_REQUIRED_TERMS = [
@@ -859,6 +897,7 @@ PRACTICE_REQUIRED_TERMS = [
     r"\bCLI\b", r"脚本", r"自动化", r"automation", r"提示词", r"prompt", r"开源", r"复现",
     r"可复用", r"starter", r"工具", r"tool(?:s|ing)?", r"skills?", r"音频工作流", r"配音",
     r"播客", r"混音", r"母带", r"转写", r"字幕", r"Unity", r"Unreal",
+    r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"实测", r"体验", r"测评", r"评测", r"可用", r"直接使用", r"创作面板",
     r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
     r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
@@ -2593,6 +2632,10 @@ def is_known_low_value_url(item_or_url):
     return _url_has_token(url, KNOWN_LOW_VALUE_URL_TOKENS)
 
 
+def is_high_value_practical_example(item):
+    return _url_has_token(str((item or {}).get("url", "") or ""), HIGH_VALUE_PRACTICAL_URL_TOKENS)
+
+
 def build_item_visible_text(item):
     parts = [
         item.get("title", ""),
@@ -2612,6 +2655,7 @@ def is_visible_ai_audio_candidate(item):
         r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase).{0,12}AI"
         r"|音乐生成|音频生成|语音模型|语音识别|语音合成|文本转语音|转写"
         r"|AI音乐|AI编曲|AI混音|AI音效|AI旋律|AI和声|AI和弦"
+        r"|全双工语音|语音交互|统一生成语音|统一生成语音、音乐与音效|UniSonate|PersonaPlex"
         r"|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-Omni|Audio-Cogito|Audio-DeepThinker"
         r"|ACE Studio|\bSuno\b|\bUdio\b|ElevenLabs|Step Audio|听觉大模型",
         text,
@@ -3953,6 +3997,8 @@ def practical_keyword_gate(item):
     core_text = build_item_filter_text(item, include_query=False)
     support_text = build_item_filter_text(item, include_query=True)
 
+    if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
+        return True
     if EXCLUDE_PATTERN.search(support_text):
         return False
     if is_non_actionable_page(item):
@@ -3982,7 +4028,8 @@ def is_audio_special_item(item):
     return bool(
         re.search(
             r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft"
-            r"|ai音乐|音乐生成|配乐|音效|旋律|和声|和弦|音符|编曲|效果器|reaper|criware|logic|cubase|audio-omni|vibevoice|ace studio",
+            r"|ai音乐|音乐生成|配乐|音效|旋律|和声|和弦|音符|编曲|效果器|reaper|criware|logic|cubase|audio-omni|vibevoice|ace studio"
+            r"|全双工|语音交互|UniSonate|PersonaPlex",
             text,
             re.IGNORECASE,
         )
@@ -4047,7 +4094,8 @@ def audio_editorial_core_hit(item):
         r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
         r"|旋律|和声|和弦|音符|编曲|混音|母带|效果器"
         r"|文本转语音|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-|ACE Studio|Steinberg|Cubase|Nuendo|SpectraLayers|UAD"
-        r"|\bDAW\b|\bVST\b|\bMIDI\b|REAPER|Wwise|CRIWARE|Logic|Fairlight|voice|speech|audio|sound design|dubbing",
+        r"|\bDAW\b|\bVST\b|\bMIDI\b|REAPER|Wwise|CRIWARE|Logic|Fairlight|voice|speech|audio|sound design|dubbing"
+        r"|全双工|语音交互|UniSonate|PersonaPlex",
         text,
         re.IGNORECASE,
     ))
@@ -4070,7 +4118,7 @@ def audio_editorial_priority(item):
     strong_hit = bool(re.search(
         r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|AI\s*音效|AI\s*编曲|AI\s*混音|AI\s*旋律|AI\s*和声|AI\s*和弦|音频生成|音乐生成|空间音频|实时交互"
         r"|实时响应|听觉大模型|音频大模型|音频理解|音频编辑|功能更新|框架|Audio-Omni|Audio-Cogito|Vibe[Vv]oice"
-        r"|REAPER|Wwise|CRIWARE|Logic|Cubase|SOTA|成本下降|定价骤减|降价|一统|大一统",
+        r"|REAPER|Wwise|CRIWARE|Logic|Cubase|UniSonate|PersonaPlex|全双工|语音交互|SOTA|成本下降|定价骤减|降价|一统|大一统",
         text,
         re.IGNORECASE,
     ))
@@ -5979,6 +6027,8 @@ def practical_relevance_score(item):
         score += 3
     if get_wechat_account_hint(item):
         score += 2
+    if is_high_value_practical_example(item):
+        score += 8
 
     if LOW_VALUE_SIGNAL.search(text):
         score -= 3
@@ -6084,6 +6134,8 @@ def is_practical_candidate(item):
     """
     text = build_item_filter_text(item, include_query=False)
     support_text = build_item_filter_text(item, include_query=True)
+    if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
+        return True
     practical_hit = bool(PRACTICAL_SIGNAL.search(text))
     experience_hit = bool(PRACTICAL_EXPERIENCE_SIGNAL.search(support_text))
     reusable_hit = bool(REUSABLE_SIGNAL.search(text))
@@ -6253,9 +6305,10 @@ def quality_filter(items):
         item["practical_score"] = pscore
         item["audio_score"] = audio_relevance_score(item)
         high_value_audio = is_high_value_audio_example(item)
+        high_value_practical = is_high_value_practical_example(item)
         if PRACTICAL_STRICT_ONLY:
             item_pool = pool_bucket(item)
-            if high_value_audio and item_pool == "DROP":
+            if (high_value_audio or high_value_practical) and item_pool == "DROP":
                 item_pool = "A"
             item["_pool"] = item_pool
             if item_pool == "DROP":
@@ -6271,7 +6324,7 @@ def quality_filter(items):
                 dynamic_threshold = max(1, dynamic_threshold - 1)
             if item_pool == "B":
                 dynamic_threshold = max(1, dynamic_threshold - 1)
-            if high_value_audio and pscore < dynamic_threshold:
+            if (high_value_audio or high_value_practical) and pscore < dynamic_threshold:
                 item["practical_score"] = dynamic_threshold
                 pscore = dynamic_threshold
             if pscore < dynamic_threshold and item_pool != "B":
@@ -6330,6 +6383,8 @@ def calculate_heat_score(item):
         heat += 22
     if is_high_value_audio_example(item):
         heat += 80
+    if is_high_value_practical_example(item):
+        heat += 55
     if is_wechat_audio_priority_item(item):
         heat += 18
     if item.get("is_priority_wechat"):
