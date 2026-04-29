@@ -7458,11 +7458,22 @@ def _build_card_html(item):
         source_icon=source_icon,
     )
 
-def generate_html(items, date_str):
-    audio_special_items = select_audio_section_items(
-        items,
-        limit=max(len(items), max(FEISHU_AUDIO_TOP_N * 8, 24)),
-    )
+def generate_html(items, date_str, audio_item_urls=None):
+    canonical_audio_urls = {
+        str(u or "").rstrip("/")
+        for u in (audio_item_urls or set())
+        if str(u or "").strip()
+    }
+    if canonical_audio_urls:
+        audio_special_items = [
+            it for it in items
+            if str(it.get("url", "") or "").rstrip("/") in canonical_audio_urls
+        ]
+    else:
+        audio_special_items = select_audio_section_items(
+            items,
+            limit=max(len(items), max(FEISHU_AUDIO_TOP_N * 8, 24)),
+        )
     audio_urls = {
         str(it.get("url", "") or "").rstrip("/")
         for it in audio_special_items
@@ -7726,7 +7737,7 @@ def build_review_feedback_records(all_review_items, selected_items):
 # 飞书推送
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_feishu_card(items, date_str, audio_source_items=None):
+def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=None):
     ranked_feishu_items = sorted(
         items,
         key=lambda x: (
@@ -7742,11 +7753,28 @@ def build_feishu_card(items, date_str, audio_source_items=None):
         preserve_order=True,
     )
     print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
+    canonical_audio_urls = {
+        str(u or "").rstrip("/")
+        for u in (audio_item_urls or set())
+        if str(u or "").strip()
+    }
     audio_source_items = audio_source_items if audio_source_items is not None else items
-    audio_candidates = select_audio_review_candidates(
-        audio_source_items,
-        limit=max(FEISHU_AUDIO_TOP_N * 3, MIN_AUDIO_REVIEW_CHOICES, FEISHU_AUDIO_TOP_N),
-    )
+    if canonical_audio_urls:
+        audio_candidates = [
+            it for it in sorted(
+                audio_source_items,
+                key=lambda x: (
+                    int(x.get("_review_rank", 10**6)),
+                    -float(x.get("heat_score", 0) or 0),
+                ),
+            )
+            if str(it.get("url", "") or "").rstrip("/") in canonical_audio_urls
+        ]
+    else:
+        audio_candidates = select_audio_review_candidates(
+            audio_source_items,
+            limit=max(FEISHU_AUDIO_TOP_N * 3, MIN_AUDIO_REVIEW_CHOICES, FEISHU_AUDIO_TOP_N),
+        )
 
     total_count = len(items)
     feishu_count = len(feishu_items)
@@ -7768,7 +7796,7 @@ def build_feishu_card(items, date_str, audio_source_items=None):
             used_audio_urls.add(u)
             if len(audio_items) >= FEISHU_AUDIO_TOP_N:
                 break
-        if not audio_items:
+        if not audio_items and not canonical_audio_urls:
             audio_items = select_audio_section_items(feishu_items, limit=min(3, FEISHU_AUDIO_TOP_N))
 
     audio_urls = {str(it.get("url", "")).rstrip("/") for it in audio_items if it.get("url")}
@@ -8438,18 +8466,28 @@ def main():
         print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
         return
 
-    selected_audio_pool = select_audio_section_items([dict(it) for it in final])
+    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
+    selected_audio_urls = {
+        url for url in final_by_url
+        if url in audio_review_urls
+    }
+    selected_audio_pool = [final_by_url[url] for url in selected_audio_urls]
     if not selected_audio_pool:
         print("[ERROR] 人工审核后未保留任何 AI音频资讯，本次不推送飞书。")
         return
 
-    final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
     audio_source_items = []
-    for item in selected_audio_pool[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
+    for item in sorted(
+        selected_audio_pool,
+        key=lambda x: (
+            int(x.get("_review_rank", 10**6)),
+            -float(x.get("heat_score", 0) or 0),
+        ),
+    )[:max(FEISHU_AUDIO_TOP_N * 3, FEISHU_AUDIO_TOP_N)]:
         url = str(item.get("url", "")).rstrip("/")
         audio_source_items.append(final_by_url.get(url, item))
 
-    html = generate_html(final, today)
+    html = generate_html(final, today, audio_item_urls=selected_audio_urls)
     output_path = OUTPUT_DIR / f"AI-m-OK-{today}.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
@@ -8458,7 +8496,7 @@ def main():
     publish_to_pages(html, today)
     backup_script_to_github(today)
 
-    card = build_feishu_card(final, today, audio_source_items=audio_source_items)
+    card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
     feishu_ok = push_feishu(card)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
