@@ -209,6 +209,12 @@ AGENT_CODING_PAGES = [
 
 AUDIO_CREATOR_FEEDS = [
     "https://developer.nvidia.com/blog/feed/",
+    "https://elevenlabs.io/blog/rss.xml",
+    "https://www.descript.com/blog/rss.xml",
+    "https://cdm.link/feed/",
+    "https://musictech.com/feed/",
+    "https://www.soundonsound.com/feed/",
+    "https://blog.native-instruments.com/feed/",
 ]
 
 WECHAT_SOURCE_NAME = "微信公众号"
@@ -259,6 +265,9 @@ WECHAT_AUDIO_FOCUS_ACCOUNTS = {
 KNOWN_DELETED_URL_TOKENS = {
     "TtkOGhulm6m5f0MzWk4z6A",
 }
+KNOWN_LOW_VALUE_URL_TOKENS = {
+    "B0tN5EMv0nxOVZbjUSZ0EQ",
+}
 HIGH_VALUE_AUDIO_URL_TOKENS = {
     "4TfXl9d0ohiCyBfdVpRB8w",
     "mIvALhN8VU5rhhl63-tcMg",
@@ -266,9 +275,21 @@ HIGH_VALUE_AUDIO_URL_TOKENS = {
 
 AUDIO_CREATOR_PAGES = [
     "https://elevenlabs.io/blog",
+    "https://www.audiokinetic.com/en/blog/",
+    "https://www.reaper.fm/news.php",
+    "https://www.steinberg.net/news/",
+    "https://www.izotope.com/en/learn.html",
     "https://replicate.com/blog",
     "https://suno.com/blog",
     "https://www.descript.com/blog",
+    "https://www.soundonsound.com/techniques",
+    "https://musictech.com/tutorials/",
+    "https://cdm.link/tag/ai/",
+    "https://www.kvraudio.com/news",
+    "https://www.production-expert.com/production-expert-1",
+    "https://www.avid.com/resource-center",
+    "https://blog.native-instruments.com/",
+    "https://www.ableton.com/en/blog/",
     "https://runwayml.com/research",
     "https://www.unrealengine.com/en-US/blog",
     "https://unity.com/blog",
@@ -305,7 +326,7 @@ LISTING_ITEMS_PER_PAGE = int(os.environ.get("LISTING_ITEMS_PER_PAGE", "2" if FAS
 GOOGLE_NEWS_QUERY_LIMIT = int(os.environ.get("GOOGLE_NEWS_QUERY_LIMIT", "4" if FAST_FETCH_MODE else str(VIDEO_QUERY_LIMIT)))
 PRACTICAL_DOMAIN_LIMIT = int(os.environ.get("PRACTICAL_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "14"))
 AGENT_DOMAIN_LIMIT = int(os.environ.get("AGENT_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "10"))
-AUDIO_CREATOR_DOMAIN_LIMIT = int(os.environ.get("AUDIO_CREATOR_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "8"))
+AUDIO_CREATOR_DOMAIN_LIMIT = int(os.environ.get("AUDIO_CREATOR_DOMAIN_LIMIT", "10" if FAST_FETCH_MODE else "14"))
 AUDIO_MUSIC_DOMAIN_LIMIT = int(os.environ.get("AUDIO_MUSIC_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "8"))
 FRONTIER_DOMAIN_LIMIT = int(os.environ.get("FRONTIER_DOMAIN_LIMIT", "6" if FAST_FETCH_MODE else "11"))
 DEEP_PAGE_DATE_IN_LISTING = os.environ.get("DEEP_PAGE_DATE_IN_LISTING", "0").strip().lower() in {"1", "true", "yes"}
@@ -487,6 +508,12 @@ GITHUB_USAGE_FILTER = re.compile(
 
 SOFT_AD_FILTER = re.compile(
     r"sponsored|广告|PR稿|合作伙伴推广|赞助|soft.?article|advertorial",
+    re.IGNORECASE,
+)
+
+PROMO_TRAINING_FILTER = re.compile(
+    r"超维训练计划|音乐教育.*(?:训练计划|课程|招生|报名|训练营)|(?:训练计划|训练营).{0,20}(?:报名|招生|课程|学员|音乐教育)"
+    r"|限时(?:报名|优惠)|扫码报名|课程顾问|加入学习群",
     re.IGNORECASE,
 )
 
@@ -762,6 +789,9 @@ MODEL_INNOVATION_QUERIES = [
 AUDIO_MUSIC_GAME_QUERIES = [
     "AI audio workflow tutorial",
     "AI music production tutorial",
+    "AI melody harmony chord arrangement mixing plugin",
+    "AI sound effect reaper wwise criware logic cubase",
+    "AI music composition DAW VST MIDI workflow",
     "AI game development tutorial",
     "AI sound design workflow",
     "AI voice synthesis tutorial",
@@ -1329,6 +1359,8 @@ def build_feedback_profile(limit=1200):
         "domain_bias": {},
         "account_bias": {},
         "negative_reason_counts": {},
+        "rejected_urls": set(),
+        "rejected_event_fingerprints": set(),
     }
     for row in rows:
         labels = _normalize_feedback_labels(row.get("labels") or row.get("label"))
@@ -1349,6 +1381,12 @@ def build_feedback_profile(limit=1200):
         account = str(row.get("account_name", "") or "").strip()
         product_key = str(row.get("product_key", "") or "").strip()
         event_fp = str(row.get("event_fingerprint", "") or "").strip()
+        url_key = canonicalize_url_for_history(row.get("url", ""))
+        if row.get("selected") is False:
+            if url_key:
+                profile["rejected_urls"].add(url_key)
+            if event_fp:
+                profile["rejected_event_fingerprints"].add(event_fp)
         if source:
             profile["source_bias"][source] = profile["source_bias"].get(source, 0.0) + weight
         if category:
@@ -1403,6 +1441,11 @@ def should_filter_by_feedback_profile(item, profile=None):
     account = str(item.get("account_name", "") or "").strip()
     product_key = extract_product_dedup_key(item)
     event_fp = extract_event_fingerprint(item)
+    url_key = canonicalize_url_for_history(item.get("url", ""))
+    if url_key and url_key in profile.get("rejected_urls", set()):
+        return True
+    if event_fp and event_fp in profile.get("rejected_event_fingerprints", set()):
+        return True
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
     domain_bias = float(profile.get("domain_bias", {}).get(domain, 0.0) or 0.0)
@@ -1921,9 +1964,20 @@ def fetch_audio_creator_guides():
     items.extend(_fetch_custom_curated_candidates(source, AUDIO_CREATOR_FEEDS, AUDIO_CREATOR_PAGES, max_entries=20))
     for dom in [
         "elevenlabs.io",
+        "audiokinetic.com",
+        "reaper.fm",
+        "steinberg.net",
+        "izotope.com",
         "replicate.com",
         "suno.com",
         "descript.com",
+        "soundonsound.com",
+        "musictech.com",
+        "cdm.link",
+        "kvraudio.com",
+        "production-expert.com",
+        "avid.com",
+        "native-instruments.com",
         "runwayml.com",
         "unity.com",
         "unrealengine.com",
@@ -2530,6 +2584,11 @@ def _url_has_token(url, tokens):
 def is_known_deleted_url(item_or_url):
     url = item_or_url if isinstance(item_or_url, str) else (item_or_url or {}).get("url", "")
     return _url_has_token(url, KNOWN_DELETED_URL_TOKENS)
+
+
+def is_known_low_value_url(item_or_url):
+    url = item_or_url if isinstance(item_or_url, str) else (item_or_url or {}).get("url", "")
+    return _url_has_token(url, KNOWN_LOW_VALUE_URL_TOKENS)
 
 
 def build_item_visible_text(item):
@@ -3907,6 +3966,11 @@ def practical_keyword_gate(item):
     return True
 
 
+def is_audio_promo_or_training_ad(item):
+    text = build_item_filter_text(item, include_query=True)
+    return bool(PROMO_TRAINING_FILTER.search(text) or is_known_low_value_url(item))
+
+
 def is_audio_special_item(item):
     text = build_item_filter_text(item, include_query=True)
     if is_high_value_audio_example(item):
@@ -3946,7 +4010,7 @@ def audio_editorial_excluded(item):
         r"|全网首发|无限用|最长\d+秒视频|参考图|剧情等生成",
         text,
         re.IGNORECASE,
-    ))
+    ) or is_audio_promo_or_training_ad(item))
 
 
 def is_business_finance_noise(item):
@@ -6086,6 +6150,9 @@ def quality_filter(items):
 
         if is_known_deleted_url(item):
             continue
+        if is_known_low_value_url(item) or PROMO_TRAINING_FILTER.search(build_item_filter_text(item, include_query=True)):
+            non_tech_filtered_count += 1
+            continue
         if HARD_BLOCK_DOMAINS.search(url):
             continue
         if REMOVED_SOURCE_DOMAINS.search(url):
@@ -7881,6 +7948,7 @@ def main():
      # ══════════════════════════════════════════════════════════════
     # ★ 人工审核为飞书推送前的硬约束
     # ══════════════════════════════════════════════════════════════
+    review_feedback_records = []
     if start_review_server is not None:
         print("\n🔍 [Phase F.5] 启动本地审核页面...")
         final = start_review_server(
@@ -7895,7 +7963,7 @@ def main():
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
             return
         print(f"      审核后保留 {len(final)} 条，继续推送流程...")
-        append_review_feedback(build_review_feedback_records(review_candidates, final))
+        review_feedback_records = build_review_feedback_records(review_candidates, final)
     elif start_review_server is None:
         print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
         return
@@ -7932,11 +8000,12 @@ def main():
         for it in final:
             pushed_history_keys.update(history_keys_from_item(it))
         save_history(pushed_history_keys)
+        append_review_feedback(review_feedback_records)
         print(
             f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, 去重键 {len(pushed_history_keys)} 条，后续将避免重复推送。"
         )
     else:
-        print("      飞书推送未成功，本次不写入历史，避免审核过但未送达的内容被误去重。")
+        print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
 
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
     dom_final = sum(1 for it in final if it.get("source_type") == "domestic")
