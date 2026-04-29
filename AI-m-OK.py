@@ -112,6 +112,10 @@ HISTORY_FILE = PAGES_DIR / "push_history.json"
 STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
+SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
+POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
+POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(PAGES_DIR / "positive_samples.json")))
 POOL_A_MIN_PUSH = int(os.environ.get("POOL_A_MIN_PUSH", "10"))
 AUTO_GITHUB_BACKUP = os.environ.get("AUTO_GITHUB_BACKUP", "1").strip().lower() not in {"0", "false", "no"}
 SCRIPT_BACKUP_BRANCH = os.environ.get("SCRIPT_BACKUP_BRANCH", "main").strip() or "main"
@@ -2632,8 +2636,55 @@ def is_known_low_value_url(item_or_url):
     return _url_has_token(url, KNOWN_LOW_VALUE_URL_TOKENS)
 
 
+_POSITIVE_SAMPLE_CACHE = None
+
+
+def _extract_wechat_url_token(url):
+    try:
+        parsed = urlparse(str(url or "").strip())
+        if parsed.netloc.lower().replace("www.", "") != "mp.weixin.qq.com":
+            return ""
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) >= 2 and parts[0] == "s":
+            return parts[1].strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def load_positive_samples():
+    global _POSITIVE_SAMPLE_CACHE
+    if _POSITIVE_SAMPLE_CACHE is not None:
+        return _POSITIVE_SAMPLE_CACHE
+    if not POSITIVE_SAMPLE_LIBRARY_FILE.exists():
+        _POSITIVE_SAMPLE_CACHE = []
+        return _POSITIVE_SAMPLE_CACHE
+    try:
+        data = json.loads(POSITIVE_SAMPLE_LIBRARY_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("samples", [])
+        _POSITIVE_SAMPLE_CACHE = data if isinstance(data, list) else []
+    except Exception:
+        _POSITIVE_SAMPLE_CACHE = []
+    return _POSITIVE_SAMPLE_CACHE
+
+
+def learned_positive_url_tokens(audio_only=False):
+    tokens = set()
+    for row in load_positive_samples():
+        if not isinstance(row, dict):
+            continue
+        if audio_only and not bool(row.get("is_audio")):
+            continue
+        token = str(row.get("url_token") or _extract_wechat_url_token(row.get("url", "")) or "").strip()
+        if token:
+            tokens.add(token)
+    return tokens
+
+
 def is_high_value_practical_example(item):
-    return _url_has_token(str((item or {}).get("url", "") or ""), HIGH_VALUE_PRACTICAL_URL_TOKENS)
+    url = str((item or {}).get("url", "") or "")
+    return _url_has_token(url, HIGH_VALUE_PRACTICAL_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens())
 
 
 def build_item_visible_text(item):
@@ -2665,7 +2716,7 @@ def is_visible_ai_audio_candidate(item):
 
 def is_high_value_audio_example(item):
     url = str((item or {}).get("url", "") or "")
-    if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS):
+    if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens(audio_only=True)):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
@@ -7722,6 +7773,184 @@ def push_review_link_to_feishu(review_url, total_count, audio_count):
     print(f"      审核页仅本地打开，不发送飞书提醒: {review_url}")
     return False
 
+
+def _decode_wechat_js_value(value):
+    value = str(value or "").strip()
+    value = value.replace("\\x26", "&").replace("\\/", "/")
+    return unescape(value).strip()
+
+
+def parse_wechat_sample_page(url):
+    resp = safe_request(url, timeout=max(15, ARTICLE_FETCH_TIMEOUT), trust_env=True)
+    if not resp:
+        return None
+    html_text = resp.text or ""
+
+    def first_match(patterns):
+        for pattern in patterns:
+            m = re.search(pattern, html_text, re.IGNORECASE | re.DOTALL)
+            if m:
+                return _decode_wechat_js_value(m.group(1))
+        return ""
+
+    title = first_match([
+        r"title:\s*JsDecode\('([^']*)'\)",
+        r'<meta\s+property="og:title"\s+content="(.*?)"',
+        r"var\s+msg_title\s*=\s*'([^']*)'",
+        r'var\s+msg_title\s*=\s*"([^"]*)"',
+    ])
+    summary = first_match([
+        r"desc:\s*JsDecode\('([^']*)'\)",
+        r'<meta\s+name="description"\s+content="(.*?)"',
+        r'<meta\s+property="og:description"\s+content="(.*?)"',
+    ])
+    account_name = first_match([
+        r"nick_name:\s*JsDecode\('([^']*)'\)",
+        r'id="js_name"[^>]*>\s*(.*?)\s*</a>',
+    ])
+    author = first_match([
+        r'<meta\s+name="author"\s+content="(.*?)"',
+        r'id="js_author_name_text"[^>]*>\s*(.*?)\s*</span>',
+    ])
+    publish_date = extract_page_published_date(url)
+    item = {
+        "url": url,
+        "canonical_url": canonicalize_url_for_history(resp.url or url),
+        "url_token": _extract_wechat_url_token(url),
+        "title": title,
+        "summary": summary,
+        "account_name": account_name,
+        "author": author,
+        "date": publish_date,
+        "source": WECHAT_SOURCE_NAME,
+        "source_type": "domestic",
+        "learned_at": _now_iso(),
+    }
+    item["is_audio"] = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item))
+    item["is_practical"] = bool(is_practical_candidate(item) or practical_keyword_gate(item))
+    item["terms"] = _extract_feedback_terms(item)
+    item["category"] = "AI音频" if item["is_audio"] else ("实践应用" if item["is_practical"] else "正样本")
+    return item
+
+
+def _load_positive_sample_library():
+    if not POSITIVE_SAMPLE_LIBRARY_FILE.exists():
+        return []
+    try:
+        data = json.loads(POSITIVE_SAMPLE_LIBRARY_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("samples", [])
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_positive_sample_library(samples):
+    POSITIVE_SAMPLE_LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"updated_at": _now_iso(), "samples": samples}
+    POSITIVE_SAMPLE_LIBRARY_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    global _POSITIVE_SAMPLE_CACHE
+    _POSITIVE_SAMPLE_CACHE = samples
+
+
+def _subscribe_learned_accounts(account_names):
+    account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
+    if not account_names:
+        return {"added": 0, "existing": 0, "failed": 0}
+    stats = {"added": 0, "existing": 0, "failed": 0}
+    for base in WERSS_BASES:
+        token = _werss_login(base)
+        if not token:
+            continue
+        existing = _werss_existing_subscriptions(base, token)
+        for account in account_names:
+            if account.lower() in existing:
+                stats["existing"] += 1
+                continue
+            ok, info = _werss_subscribe_account(base, token, account)
+            if ok:
+                stats["added"] += 1
+                existing[account.lower()] = {"mp_name": info}
+            else:
+                stats["failed"] += 1
+        return stats
+    stats["failed"] += len(account_names)
+    return stats
+
+
+def learn_positive_samples_only():
+    if not POSITIVE_SAMPLE_INBOX_FILE.exists():
+        try:
+            POSITIVE_SAMPLE_INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+            POSITIVE_SAMPLE_INBOX_FILE.write_text(
+                "# 一行一个微信公众号文章链接。运行：python AI-m-OK.py --learn-samples\n",
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[ERROR] 无法创建样例入口文件: {POSITIVE_SAMPLE_INBOX_FILE} ({e})")
+            return
+        print(f"[INFO] 已创建样例入口文件: {POSITIVE_SAMPLE_INBOX_FILE}")
+        print("[INFO] 把 mp.weixin.qq.com/s/... 链接粘进去后，再运行 --learn-samples。")
+        return
+
+    raw_lines = POSITIVE_SAMPLE_INBOX_FILE.read_text(encoding="utf-8").splitlines()
+    urls = []
+    passthrough = []
+    for line in raw_lines:
+        stripped = line.strip()
+        found = re.findall(r"https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_\-]+", stripped)
+        if found:
+            urls.extend(found)
+        elif stripped and not stripped.startswith("#"):
+            passthrough.append(line)
+
+    urls = list(dict.fromkeys(urls))
+    if not urls:
+        print(f"[INFO] 没有发现待学习的微信公众号链接: {POSITIVE_SAMPLE_INBOX_FILE}")
+        return
+
+    library = _load_positive_sample_library()
+    by_key = {
+        canonicalize_url_for_history(row.get("url", "")) or row.get("url_token", ""): row
+        for row in library
+        if isinstance(row, dict)
+    }
+    learned = []
+    failed = []
+    for url in urls:
+        print(f"  学习样例: {url}")
+        try:
+            row = parse_wechat_sample_page(url)
+        except Exception as e:
+            print(f"    [WARN] 解析失败: {e}")
+            row = None
+        if not row or not row.get("title"):
+            print("    [WARN] 未能解析标题，保留在待学习文件中。")
+            failed.append(url)
+            continue
+        key = row.get("canonical_url") or canonicalize_url_for_history(row.get("url", "")) or row.get("url_token")
+        by_key[key] = row
+        learned.append(row)
+        print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')} | {row.get('title')}")
+
+    _save_positive_sample_library(list(by_key.values()))
+    sub_stats = _subscribe_learned_accounts([row.get("account_name", "") for row in learned])
+    if learned:
+        with open(POSITIVE_SAMPLE_LEARNED_FILE, "a", encoding="utf-8") as f:
+            for row in learned:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    remaining = passthrough + failed
+    POSITIVE_SAMPLE_INBOX_FILE.write_text(
+        ("\n".join(remaining).strip() + "\n") if remaining else "",
+        encoding="utf-8",
+    )
+    audio_count = sum(1 for row in learned if row.get("is_audio"))
+    print(f"\n[OK] 样例学习完成: 新学习 {len(learned)} 条, AI音频 {audio_count} 条, 失败 {len(failed)} 条")
+    print(f"[OK] 正样本库: {POSITIVE_SAMPLE_LIBRARY_FILE}")
+    print(f"[OK] WeRSS 订阅: 新增 {sub_stats['added']} 个, 已有 {sub_stats['existing']} 个, 失败 {sub_stats['failed']} 个")
+    print("[INFO] 只学习模式不会生成审核页，也不会推送飞书。")
+
+
 def publish_to_pages(html_content, date_str):
     try:
         pages = PAGES_DIR
@@ -8072,5 +8301,8 @@ def main():
     print(f"{'='*60}\n")
 
 if __name__ == "__main__":
-    main()
+    if "--learn-samples" in sys.argv:
+        learn_positive_samples_only()
+    else:
+        main()
 
