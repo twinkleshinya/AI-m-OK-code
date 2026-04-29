@@ -214,20 +214,14 @@ AGENT_CODING_PAGES = [
 
 AUDIO_CREATOR_FEEDS = [
     "https://developer.nvidia.com/blog/feed/",
-    "https://elevenlabs.io/blog/rss.xml",
-    "https://www.descript.com/blog/rss.xml",
     "https://cdm.link/feed/",
     "https://musictech.com/feed/",
-    "https://www.soundonsound.com/feed/",
     "https://blog.native-instruments.com/feed/",
 ]
 
 AI_AUDIO_DISCOVERY_FEEDS = [
-    "https://elevenlabs.io/blog/rss.xml",
-    "https://www.descript.com/blog/rss.xml",
     "https://cdm.link/feed/",
     "https://musictech.com/feed/",
-    "https://www.soundonsound.com/feed/",
     "https://blog.native-instruments.com/feed/",
     "https://developer.nvidia.com/blog/feed/",
 ]
@@ -7465,7 +7459,7 @@ def _build_card_html(item):
     )
 
 def generate_html(items, date_str):
-    audio_special_items = select_audio_special_items(
+    audio_special_items = select_audio_section_items(
         items,
         limit=max(len(items), max(FEISHU_AUDIO_TOP_N * 8, 24)),
     )
@@ -7614,6 +7608,11 @@ def select_audio_review_candidates(items, limit=None):
     return selected
 
 
+def select_audio_section_items(items, limit=None):
+    limit = limit or max(len(items or []), FEISHU_AUDIO_TOP_N, MIN_AUDIO_REVIEW_CHOICES)
+    return select_audio_review_candidates(items, limit=limit)
+
+
 def is_item_link_accessible(item):
     url = str(item.get("url", "") or "").strip()
     if not url:
@@ -7753,19 +7752,24 @@ def build_feishu_card(items, date_str, audio_source_items=None):
     feishu_count = len(feishu_items)
 
     source_count = len(set(it["source"] for it in feishu_items))
-    used_urls = {str(it.get("url", "")).rstrip("/") for it in feishu_items}
+    feishu_url_map = {
+        str(it.get("url", "")).rstrip("/"): it
+        for it in feishu_items
+        if it.get("url")
+    }
+    used_audio_urls = set()
     audio_items = []
     if FEISHU_AUDIO_TOP_N > 0:
         for it in audio_candidates:
             u = str(it.get("url", "")).rstrip("/")
-            if not u or u in used_urls:
+            if not u or u in used_audio_urls:
                 continue
-            audio_items.append(it)
-            used_urls.add(u)
+            audio_items.append(feishu_url_map.get(u, it))
+            used_audio_urls.add(u)
             if len(audio_items) >= FEISHU_AUDIO_TOP_N:
                 break
         if not audio_items:
-            audio_items = [it for it in feishu_items if is_audio_special_item(it)][: min(3, FEISHU_AUDIO_TOP_N)]
+            audio_items = select_audio_section_items(feishu_items, limit=min(3, FEISHU_AUDIO_TOP_N))
 
     audio_urls = {str(it.get("url", "")).rstrip("/") for it in audio_items if it.get("url")}
     base_feishu_items = [it for it in feishu_items if str(it.get("url", "")).rstrip("/") not in audio_urls]
@@ -8403,8 +8407,8 @@ def main():
         it for it in review_candidates
         if str(it.get("url", "")).rstrip("/") in final_urls_after_summary
     ]
-    audio_special_pool = select_audio_special_items([dict(it) for it in review_candidates])
-    audio_review_pool = select_audio_review_candidates([dict(it) for it in review_candidates])
+    audio_special_pool = select_audio_section_items([dict(it) for it in review_candidates])
+    audio_review_pool = select_audio_section_items([dict(it) for it in review_candidates])
     audio_review_urls = {
         str(item.get("url", "")).rstrip("/")
         for item in audio_review_pool
@@ -8434,7 +8438,7 @@ def main():
         print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
         return
 
-    selected_audio_pool = select_audio_review_candidates([dict(it) for it in final])
+    selected_audio_pool = select_audio_section_items([dict(it) for it in final])
     if not selected_audio_pool:
         print("[ERROR] 人工审核后未保留任何 AI音频资讯，本次不推送飞书。")
         return
