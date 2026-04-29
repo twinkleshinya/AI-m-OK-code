@@ -138,6 +138,10 @@ FEISHU_TOP_N = 15
 FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
 MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "10"))
 REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
+REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
+REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
+FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
+FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -932,7 +936,7 @@ SOURCE_WEIGHT = {
     "AI Frontier": 93,
     "YouTube": 78,
     "B站": 80,
-    "微信公众号": 92,
+    "微信公众号": 82,
     "机器之心": 85,
     "量子位": 75,
     "36氪": 70,
@@ -6396,8 +6400,16 @@ def deduplicate_and_rank(all_items, review_mode=False):
 
     if review_mode:
         limit = max(REVIEW_CANDIDATE_MAX, MIN_ITEMS)
-        review_candidates = deduped[:limit]
-        print(f"      [v3.9] 审核候选池: {len(review_candidates)} 条")
+        review_candidates = select_source_balanced_items(
+            deduped,
+            limit=limit,
+            default_max=REVIEW_MAX_PER_SOURCE,
+            wechat_max=REVIEW_WECHAT_MAX,
+        )
+        print(
+            f"      [v3.9] 审核候选池: {len(review_candidates)} 条 "
+            f"(来源: {source_mix_text(review_candidates)})"
+        )
         return review_candidates
     return enforce_diversity_with_pool(deduped)
 
@@ -6450,6 +6462,63 @@ def enforce_diversity(items):
     final.sort(key=lambda x: x.get("heat_score", 0), reverse=True)
 
     return final[:MAX_ITEMS]
+
+
+def source_mix_text(items, max_parts=8):
+    counts = {}
+    for item in items or []:
+        src = item.get("source", "未知来源")
+        counts[src] = counts.get(src, 0) + 1
+    parts = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    text = " / ".join(f"{src} {count}" for src, count in parts[:max_parts])
+    if len(parts) > max_parts:
+        text += f" / 其他 {sum(count for _, count in parts[max_parts:])}"
+    return text or "无"
+
+
+def source_cap_for_item(item, default_max, wechat_max):
+    src = item.get("source")
+    if src == WECHAT_SOURCE_NAME:
+        return max(0, wechat_max)
+    return max(0, default_max)
+
+
+def select_source_balanced_items(items, limit, default_max, wechat_max, preserve_order=False):
+    if not items:
+        return []
+    limit = min(limit or len(items), len(items))
+    if preserve_order:
+        ordered = sorted(
+            items,
+            key=lambda x: (
+                int(x.get("_review_rank", 10**6)),
+                -float(x.get("heat_score", 0) or 0),
+            ),
+        )
+    else:
+        ordered = sorted(
+            items,
+            key=lambda x: (
+                float(x.get("heat_score", 0) or 0),
+                float(x.get("audio_score", 0) or 0),
+                float(x.get("practical_score", 0) or 0),
+                float(x.get("_completeness", 0) or 0),
+            ),
+            reverse=True,
+        )
+
+    selected = []
+    counts = {}
+    for item in ordered:
+        src = item.get("source", "")
+        cap = source_cap_for_item(item, default_max, wechat_max)
+        if counts.get(src, 0) >= cap:
+            continue
+        selected.append(item)
+        counts[src] = counts.get(src, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def enforce_diversity_with_pool(items):
@@ -7320,13 +7389,21 @@ def build_review_feedback_records(all_review_items, selected_items):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_feishu_card(items, date_str, audio_source_items=None):
-    feishu_items = sorted(
+    ranked_feishu_items = sorted(
         items,
         key=lambda x: (
             int(x.get("_review_rank", 10**6)),
             -float(x.get("heat_score", 0) or 0),
         ),
-    )[:FEISHU_TOP_N]
+    )
+    feishu_items = select_source_balanced_items(
+        ranked_feishu_items,
+        limit=FEISHU_TOP_N,
+        default_max=FEISHU_MAX_PER_SOURCE,
+        wechat_max=FEISHU_WECHAT_MAX,
+        preserve_order=True,
+    )
+    print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
     audio_source_items = audio_source_items if audio_source_items is not None else items
     audio_candidates = select_audio_review_candidates(
         audio_source_items,
@@ -7731,6 +7808,29 @@ def main():
         review_urls.add(url)
         if sum(1 for it in review_candidates if is_audio_special_item(it)) >= max(MIN_AUDIO_REVIEW_CHOICES, 3):
             break
+
+    review_candidates = select_source_balanced_items(
+        review_candidates,
+        limit=REVIEW_CANDIDATE_MAX,
+        default_max=REVIEW_MAX_PER_SOURCE,
+        wechat_max=REVIEW_WECHAT_MAX,
+    )
+    min_visible_audio = min(3, len(audio_review_seed))
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < min_visible_audio:
+        review_urls = {
+            str(it.get("url", "")).rstrip("/")
+            for it in review_candidates
+            if it.get("url")
+        }
+        for item in audio_review_seed:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= min_visible_audio:
+                break
+    print(f"      [v4.0] 审核页来源配比: {source_mix_text(review_candidates)}")
 
     review_candidates = generate_chinese_summaries(review_candidates)
     review_candidates = filter_inaccessible_items(review_candidates)
