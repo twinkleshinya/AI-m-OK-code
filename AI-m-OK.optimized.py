@@ -112,6 +112,10 @@ HISTORY_FILE = PAGES_DIR / "push_history.json"
 STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
+SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
+POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
+POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(PAGES_DIR / "positive_samples.json")))
 POOL_A_MIN_PUSH = int(os.environ.get("POOL_A_MIN_PUSH", "10"))
 AUTO_GITHUB_BACKUP = os.environ.get("AUTO_GITHUB_BACKUP", "1").strip().lower() not in {"0", "false", "no"}
 SCRIPT_BACKUP_BRANCH = os.environ.get("SCRIPT_BACKUP_BRANCH", "main").strip() or "main"
@@ -138,6 +142,12 @@ FEISHU_TOP_N = 15
 FEISHU_AUDIO_TOP_N = int(os.environ.get("FEISHU_AUDIO_TOP_N", "4"))
 MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "10"))
 REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
+REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
+REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
+FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
+FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
+WECHAT_AUDIO_SOURCE_WEIGHT = int(os.environ.get("WECHAT_AUDIO_SOURCE_WEIGHT", "96"))
+MIN_AUDIO_DISCOVERY_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_DISCOVERY_REVIEW_CHOICES", "12"))
 
 # ── 实用导向筛选（v3.3） ──
 PRACTICAL_STRICT_ONLY = os.environ.get("PRACTICAL_STRICT_ONLY", "1").strip().lower() not in {"0", "false", "no"}
@@ -204,6 +214,22 @@ AGENT_CODING_PAGES = [
 
 AUDIO_CREATOR_FEEDS = [
     "https://developer.nvidia.com/blog/feed/",
+    "https://elevenlabs.io/blog/rss.xml",
+    "https://www.descript.com/blog/rss.xml",
+    "https://cdm.link/feed/",
+    "https://musictech.com/feed/",
+    "https://www.soundonsound.com/feed/",
+    "https://blog.native-instruments.com/feed/",
+]
+
+AI_AUDIO_DISCOVERY_FEEDS = [
+    "https://elevenlabs.io/blog/rss.xml",
+    "https://www.descript.com/blog/rss.xml",
+    "https://cdm.link/feed/",
+    "https://musictech.com/feed/",
+    "https://www.soundonsound.com/feed/",
+    "https://blog.native-instruments.com/feed/",
+    "https://developer.nvidia.com/blog/feed/",
 ]
 
 WECHAT_SOURCE_NAME = "微信公众号"
@@ -221,7 +247,8 @@ WECHAT_OFFICIAL_ACCOUNTS = [
         "AI工具派,罗斯基,游戏陀螺,美股研究社,加百力,IEEE电气电子工程师学会,Second Sentience,游戏花火,"
         "电子咖啡,游戏茶馆,游戏进化论,游戏研究社,Z Potentials,游戏日报,差评X.PIN,竞核,逛逛GitHub,莫理,尘红,"
         "AI大模型调参指北笔记,绿联NAS私有云,非凡产研,测试工程化,AI音频时代,HsuDan,AI前锋团,钻进盒子里,工具驯兽师,资源设,科技探幽,"
-        "APPSO,冉胖子AI时光机"
+        "APPSO,冉胖子AI时光机,华哥谈AI,模型之声,角落里的AI世界,AI信息Gap,赛博微笔,兔师兄369,"
+        "DeeplearningAI,AI变革指南,聚大模型前言,如此才是,萝卜AI笔记"
     ).split(",")
     if x.strip()
 ]
@@ -241,6 +268,17 @@ WECHAT_PRIORITY_ACCOUNTS = {
     "夕小瑶科技说",
     "APPSO",
     "冉胖子AI时光机",
+    "华哥谈AI",
+    "模型之声",
+    "角落里的AI世界",
+    "AI信息Gap",
+    "赛博微笔",
+    "兔师兄369",
+    "DeeplearningAI",
+    "AI变革指南",
+    "聚大模型前言",
+    "如此才是",
+    "萝卜AI笔记",
 }
 WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "风亭韵律",
@@ -249,25 +287,82 @@ WECHAT_AUDIO_FOCUS_ACCOUNTS = {
     "AI音频时代",
     "上和弦",
     "冉胖子AI时光机",
+    "模型之声",
+    "DeeplearningAI",
+    "AI变革指南",
+    "如此才是",
 }
 
 KNOWN_DELETED_URL_TOKENS = {
     "TtkOGhulm6m5f0MzWk4z6A",
 }
+KNOWN_LOW_VALUE_URL_TOKENS = {
+    "B0tN5EMv0nxOVZbjUSZ0EQ",
+    "tools/music/yinshu",
+}
 HIGH_VALUE_AUDIO_URL_TOKENS = {
     "4TfXl9d0ohiCyBfdVpRB8w",
     "mIvALhN8VU5rhhl63-tcMg",
+    "KjQ-bIxBVRve4ozEhFMbbA",
+    "nJ1ee0SoN5pEp-8QQ7Yarw",
+    "SOcVnJ9SFGMfVwKX_ifHeA",
+    "8KjYfCn0FZMIw64HzuB3kw",
+}
+HIGH_VALUE_PRACTICAL_URL_TOKENS = {
+    "vN7S3V8obJ1dpecp0rYADQ",
+    "KjQ-bIxBVRve4ozEhFMbbA",
+    "_qihWfL7rli3bfwKm9jLfA",
+    "sRiM5cP6QupeOJfXqYq80w",
+    "1iEFUorkp6pRSug2BLQabA",
+    "CpedmQKSQytZ5CeldSq8JA",
+    "nJ1ee0SoN5pEp-8QQ7Yarw",
+    "SOcVnJ9SFGMfVwKX_ifHeA",
+    "GN9uSG__EIk7CYQHCC9tyw",
+    "8KjYfCn0FZMIw64HzuB3kw",
+    "qC2gbQuJy2_yClbmCINUTA",
 }
 
 AUDIO_CREATOR_PAGES = [
     "https://elevenlabs.io/blog",
+    "https://www.audiokinetic.com/en/blog/",
+    "https://www.reaper.fm/news.php",
+    "https://www.steinberg.net/news/",
+    "https://www.izotope.com/en/learn.html",
     "https://replicate.com/blog",
     "https://suno.com/blog",
     "https://www.descript.com/blog",
+    "https://www.soundonsound.com/techniques",
+    "https://musictech.com/tutorials/",
+    "https://cdm.link/tag/ai/",
+    "https://www.kvraudio.com/news",
+    "https://www.production-expert.com/production-expert-1",
+    "https://www.avid.com/resource-center",
+    "https://blog.native-instruments.com/",
+    "https://www.ableton.com/en/blog/",
     "https://runwayml.com/research",
     "https://www.unrealengine.com/en-US/blog",
     "https://unity.com/blog",
     "https://developer.nvidia.com/blog",
+]
+
+AI_AUDIO_DISCOVERY_PAGES = [
+    "https://elevenlabs.io/blog",
+    "https://www.descript.com/blog",
+    "https://suno.com/blog",
+    "https://udio.com/blog",
+    "https://www.audiokinetic.com/en/blog/",
+    "https://www.reaper.fm/news.php",
+    "https://www.steinberg.net/news/",
+    "https://www.izotope.com/en/learn.html",
+    "https://blog.native-instruments.com/",
+    "https://www.ableton.com/en/blog/",
+    "https://www.soundonsound.com/techniques",
+    "https://musictech.com/tutorials/",
+    "https://cdm.link/tag/ai/",
+    "https://www.kvraudio.com/news",
+    "https://www.production-expert.com/production-expert-1",
+    "https://www.audiopluginguy.com/",
+    "https://www.attackmagazine.com/technique/",
 ]
 
 NITTER_BASES = [
@@ -300,8 +395,9 @@ LISTING_ITEMS_PER_PAGE = int(os.environ.get("LISTING_ITEMS_PER_PAGE", "2" if FAS
 GOOGLE_NEWS_QUERY_LIMIT = int(os.environ.get("GOOGLE_NEWS_QUERY_LIMIT", "4" if FAST_FETCH_MODE else str(VIDEO_QUERY_LIMIT)))
 PRACTICAL_DOMAIN_LIMIT = int(os.environ.get("PRACTICAL_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "14"))
 AGENT_DOMAIN_LIMIT = int(os.environ.get("AGENT_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "10"))
-AUDIO_CREATOR_DOMAIN_LIMIT = int(os.environ.get("AUDIO_CREATOR_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "8"))
+AUDIO_CREATOR_DOMAIN_LIMIT = int(os.environ.get("AUDIO_CREATOR_DOMAIN_LIMIT", "10" if FAST_FETCH_MODE else "14"))
 AUDIO_MUSIC_DOMAIN_LIMIT = int(os.environ.get("AUDIO_MUSIC_DOMAIN_LIMIT", "5" if FAST_FETCH_MODE else "8"))
+AI_AUDIO_DISCOVERY_DOMAIN_LIMIT = int(os.environ.get("AI_AUDIO_DISCOVERY_DOMAIN_LIMIT", "12" if FAST_FETCH_MODE else "18"))
 FRONTIER_DOMAIN_LIMIT = int(os.environ.get("FRONTIER_DOMAIN_LIMIT", "6" if FAST_FETCH_MODE else "11"))
 DEEP_PAGE_DATE_IN_LISTING = os.environ.get("DEEP_PAGE_DATE_IN_LISTING", "0").strip().lower() in {"1", "true", "yes"}
 WECHAT_SEARCH_QUERY_LIMIT = int(os.environ.get("WECHAT_SEARCH_QUERY_LIMIT", "8" if FAST_FETCH_MODE else "16"))
@@ -485,6 +581,12 @@ SOFT_AD_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+PROMO_TRAINING_FILTER = re.compile(
+    r"超维训练计划|音乐教育.*(?:训练计划|课程|招生|报名|训练营)|(?:训练计划|训练营).{0,20}(?:报名|招生|课程|学员|音乐教育)"
+    r"|限时(?:报名|优惠)|扫码报名|课程顾问|加入学习群",
+    re.IGNORECASE,
+)
+
 # ── ★ v3.1 新增：网页底部备案与非新闻文本过滤器 ──
 FOOTER_TEXT_FILTER = re.compile(
     r"ICP备|公网安备|版权所有|All Rights Reserved|联系我们|关于我们|免责声明|隐私政策|使用条款|营业执照|增值电信业务|不良信息举报",
@@ -512,6 +614,7 @@ INVESTMENT_URL_FILTER = re.compile(
 PRODUCT_LANDING_FILTER = re.compile(
     r"coze\.cn|coze\.com"
     r"|overview\?utm_"
+    r"|aihub\.cn/(?:tools|go)/"
     r"|/product[s]?[/\?]"
     r"|/pricing[/\?]"
     r"|/landing[/\?]"
@@ -644,14 +747,17 @@ PRACTICAL_SIGNAL = re.compile(
     r"|skill|skills|skillset|agentic|copilot|n8n|zapier|make\.com|dify|coze|metagpt|langflow|langgraph"
     r"|medrag|kag|trendradar|报表自动化|AI报表|智能客服|客服助手|工作区|workspace"
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
-    r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样",
+    r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
+    r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase"
+    r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios",
     re.IGNORECASE,
 )
 
 PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
     r"实测|体验|上手|测评|评测|可用|直接使用|直接进入|入口|面板|创作面板"
     r"|一句指令|一条指令|指令|prompt|提示词|生成|生视频|视频创作|故事板|分镜|运镜"
-    r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音"
+    r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音|旋律|和声|和弦|音符|编曲|效果器"
+    r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios"
     r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
     r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
     re.IGNORECASE,
@@ -756,6 +862,9 @@ MODEL_INNOVATION_QUERIES = [
 AUDIO_MUSIC_GAME_QUERIES = [
     "AI audio workflow tutorial",
     "AI music production tutorial",
+    "AI melody harmony chord arrangement mixing plugin",
+    "AI sound effect reaper wwise criware logic cubase",
+    "AI music composition DAW VST MIDI workflow",
     "AI game development tutorial",
     "AI sound design workflow",
     "AI voice synthesis tutorial",
@@ -771,6 +880,31 @@ AUDIO_MUSIC_GAME_QUERIES = [
     "game AI tool tutorial",
 ]
 
+AI_AUDIO_DISCOVERY_QUERIES = [
+    "AI audio",
+    "AI music",
+    "voice AI",
+    "speech model",
+    "TTS ASR voice agent",
+    "AI sound design",
+    "AI music production",
+    "AI mixing mastering plugin",
+    "AI DAW VST MIDI",
+    "REAPER AI",
+    "Wwise AI",
+    "CRIWARE AI",
+    "Logic Pro AI",
+    "Cubase AI",
+    "AI配音",
+    "AI音频",
+    "AI音乐",
+    "AI编曲",
+    "AI混音",
+    "AI音效",
+    "全双工语音",
+    "语音交互 AI",
+]
+
 ORDINARY_HINT_TERMS = [
     r"AI\s*skill", r"AI\s*skills", r"AI\s*agent", r"AI\s*tutorial",
     r"AI\s*tool", r"AI\s*tools", r"AI\s*workflow", r"AI\s*automation",
@@ -781,6 +915,7 @@ ORDINARY_HINT_TERMS = [
     r"ChatGPT 插件", r"AI工作区", r"智能客服", r"低代码", r"无代码", r"Lynx", r"Apidog",
     r"AI 音频", r"AI 音乐", r"AI 游戏", r"voice AI", r"music AI", r"game AI",
     r"语音生成", r"语音克隆", r"音乐生成", r"游戏开发AI", r"AI编程", r"浏览器AI",
+    r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
 
 REQUIRED_TERMS = [
@@ -790,6 +925,7 @@ REQUIRED_TERMS = [
     r"plugin", r"template", r"best practice", r"playbook", r"技能", r"技巧", r"流程", r"拆解",
     r"实测", r"体验", r"测评", r"评测", r"创作面板", r"一句指令", r"提示词",
     r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
+    r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
 ]
 
@@ -811,6 +947,7 @@ AI_CORE_TERMS = [
     r"AI\s*音频", r"AI\s*音乐", r"AI\s*游戏", r"voice\s*AI", r"music\s*AI", r"game\s*AI",
     r"语音识别", r"语音克隆", r"语音合成", r"AI编程", r"浏览器AI", r"Gemini\s*Skills",
     r"\bASR\b", r"\bTTS\b", r"Veo", r"Sora", r"音频生成", r"音乐生成",
+    r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
 
 PRACTICE_REQUIRED_TERMS = [
@@ -821,6 +958,7 @@ PRACTICE_REQUIRED_TERMS = [
     r"\bCLI\b", r"脚本", r"自动化", r"automation", r"提示词", r"prompt", r"开源", r"复现",
     r"可复用", r"starter", r"工具", r"tool(?:s|ing)?", r"skills?", r"音频工作流", r"配音",
     r"播客", r"混音", r"母带", r"转写", r"字幕", r"Unity", r"Unreal",
+    r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"实测", r"体验", r"测评", r"评测", r"可用", r"直接使用", r"创作面板",
     r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
     r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
@@ -899,6 +1037,7 @@ SOURCE_REGISTRY = {
     "Practical Guides": {"type": "intl", "display": "Practical Guides", "icon": "🛠️"},
     "Agent/Coding AI":  {"type": "intl", "display": "Agent/Coding AI",  "icon": "🤖"},
     "Audio Creator AI": {"type": "intl", "display": "Audio Creator AI", "icon": "🎵"},
+    "AI Audio Discovery": {"type": "intl", "display": "AI Audio Discovery", "icon": "🎧"},
     "AI Frontier":      {"type": "intl", "display": "AI Frontier",      "icon": "🧪"},
     "YouTube":          {"type": "intl", "display": "YouTube",          "icon": "📺"},
     "B站":               {"type": "domestic", "display": "B站",           "icon": "📺"},
@@ -929,10 +1068,11 @@ SOURCE_WEIGHT = {
     "Practical Guides": 95,
     "Agent/Coding AI": 96,
     "Audio Creator AI": 94,
+    "AI Audio Discovery": 92,
     "AI Frontier": 93,
     "YouTube": 78,
     "B站": 80,
-    "微信公众号": 92,
+    "微信公众号": 82,
     "机器之心": 85,
     "量子位": 75,
     "36氪": 70,
@@ -1323,6 +1463,8 @@ def build_feedback_profile(limit=1200):
         "domain_bias": {},
         "account_bias": {},
         "negative_reason_counts": {},
+        "rejected_urls": set(),
+        "rejected_event_fingerprints": set(),
     }
     for row in rows:
         labels = _normalize_feedback_labels(row.get("labels") or row.get("label"))
@@ -1343,6 +1485,12 @@ def build_feedback_profile(limit=1200):
         account = str(row.get("account_name", "") or "").strip()
         product_key = str(row.get("product_key", "") or "").strip()
         event_fp = str(row.get("event_fingerprint", "") or "").strip()
+        url_key = canonicalize_url_for_history(row.get("url", ""))
+        if row.get("selected") is False:
+            if url_key:
+                profile["rejected_urls"].add(url_key)
+            if event_fp:
+                profile["rejected_event_fingerprints"].add(event_fp)
         if source:
             profile["source_bias"][source] = profile["source_bias"].get(source, 0.0) + weight
         if category:
@@ -1397,6 +1545,11 @@ def should_filter_by_feedback_profile(item, profile=None):
     account = str(item.get("account_name", "") or "").strip()
     product_key = extract_product_dedup_key(item)
     event_fp = extract_event_fingerprint(item)
+    url_key = canonicalize_url_for_history(item.get("url", ""))
+    if url_key and url_key in profile.get("rejected_urls", set()):
+        return True
+    if event_fp and event_fp in profile.get("rejected_event_fingerprints", set()):
+        return True
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
     domain_bias = float(profile.get("domain_bias", {}).get(domain, 0.0) or 0.0)
@@ -1915,9 +2068,20 @@ def fetch_audio_creator_guides():
     items.extend(_fetch_custom_curated_candidates(source, AUDIO_CREATOR_FEEDS, AUDIO_CREATOR_PAGES, max_entries=20))
     for dom in [
         "elevenlabs.io",
+        "audiokinetic.com",
+        "reaper.fm",
+        "steinberg.net",
+        "izotope.com",
         "replicate.com",
         "suno.com",
         "descript.com",
+        "soundonsound.com",
+        "musictech.com",
+        "cdm.link",
+        "kvraudio.com",
+        "production-expert.com",
+        "avid.com",
+        "native-instruments.com",
         "runwayml.com",
         "unity.com",
         "unrealengine.com",
@@ -1949,6 +2113,84 @@ def fetch_audio_creator_guides():
         dedup.append(it)
 
     print(f"      [B.5] 音频/音乐/游戏创作源完成: {len(dedup)} 条 (raw={stats['raw']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})")
+    tracker.record(source, dedup)
+    return dedup
+
+
+def audio_discovery_gate(item):
+    if is_business_finance_noise(item) or is_security_or_hype_noise(item) or is_audio_promo_or_training_ad(item):
+        return False
+    text = build_item_filter_text(item, include_query=True)
+    has_ai = bool(AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|artificial intelligence|generative", text, re.IGNORECASE))
+    has_audio = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item) or audio_relevance_score(item) >= 2)
+    return has_ai and has_audio
+
+
+def fetch_ai_audio_discovery_sources():
+    source = "AI Audio Discovery"
+    items = []
+    stats = {"raw": 0, "date": 0, "keyword": 0}
+    print("      [B.5] AI音频探索源抓取中...")
+
+    items.extend(_fetch_custom_curated_candidates(source, AI_AUDIO_DISCOVERY_FEEDS, AI_AUDIO_DISCOVERY_PAGES, max_entries=28))
+    discovery_domains = [
+        "elevenlabs.io",
+        "suno.com",
+        "udio.com",
+        "descript.com",
+        "audiokinetic.com",
+        "reaper.fm",
+        "steinberg.net",
+        "izotope.com",
+        "soundonsound.com",
+        "musictech.com",
+        "cdm.link",
+        "kvraudio.com",
+        "production-expert.com",
+        "native-instruments.com",
+        "ableton.com",
+        "developer.nvidia.com",
+        "replicate.com",
+        "huggingface.co",
+    ]
+    for dom in discovery_domains[:AI_AUDIO_DISCOVERY_DOMAIN_LIMIT]:
+        items.extend(
+            _fetch_google_news_site(
+                dom,
+                source_name=source,
+                extra_queries=AI_AUDIO_DISCOVERY_QUERIES[:max(GOOGLE_NEWS_QUERY_LIMIT, 6)],
+                max_entries=4,
+            )
+        )
+
+    for query in AI_AUDIO_DISCOVERY_QUERIES[:max(GOOGLE_NEWS_QUERY_LIMIT, 8)]:
+        items.extend(
+            parse_rss_feed_candidates(
+                [build_google_news_rss(query)],
+                source_name=source,
+                max_entries=4,
+                ai_filter=False,
+            )
+        )
+
+    dedup = []
+    seen = set()
+    stats["raw"] = len(items)
+    for it in items:
+        url = it.get("url", "").rstrip("/")
+        if not url or url in seen:
+            continue
+        if not is_within_days(it.get("date"), 30):
+            stats["date"] += 1
+            continue
+        if not audio_discovery_gate(it):
+            stats["keyword"] += 1
+            continue
+        it["_audio_discovery"] = True
+        seen.add(url)
+        dedup.append(it)
+
+    print(f"      [B.5] AI音频探索源完成: {len(dedup)} 条 (raw={stats['raw']}, 日期过滤={stats['date']}, 关键词过滤={stats['keyword']})")
     tracker.record(source, dedup)
     return dedup
 
@@ -2526,6 +2768,62 @@ def is_known_deleted_url(item_or_url):
     return _url_has_token(url, KNOWN_DELETED_URL_TOKENS)
 
 
+def is_known_low_value_url(item_or_url):
+    url = item_or_url if isinstance(item_or_url, str) else (item_or_url or {}).get("url", "")
+    return _url_has_token(url, KNOWN_LOW_VALUE_URL_TOKENS)
+
+
+_POSITIVE_SAMPLE_CACHE = None
+
+
+def _extract_wechat_url_token(url):
+    try:
+        parsed = urlparse(str(url or "").strip())
+        if parsed.netloc.lower().replace("www.", "") != "mp.weixin.qq.com":
+            return ""
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) >= 2 and parts[0] == "s":
+            return parts[1].strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def load_positive_samples():
+    global _POSITIVE_SAMPLE_CACHE
+    if _POSITIVE_SAMPLE_CACHE is not None:
+        return _POSITIVE_SAMPLE_CACHE
+    if not POSITIVE_SAMPLE_LIBRARY_FILE.exists():
+        _POSITIVE_SAMPLE_CACHE = []
+        return _POSITIVE_SAMPLE_CACHE
+    try:
+        data = json.loads(POSITIVE_SAMPLE_LIBRARY_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("samples", [])
+        _POSITIVE_SAMPLE_CACHE = data if isinstance(data, list) else []
+    except Exception:
+        _POSITIVE_SAMPLE_CACHE = []
+    return _POSITIVE_SAMPLE_CACHE
+
+
+def learned_positive_url_tokens(audio_only=False):
+    tokens = set()
+    for row in load_positive_samples():
+        if not isinstance(row, dict):
+            continue
+        if audio_only and not bool(row.get("is_audio")):
+            continue
+        token = str(row.get("url_token") or _extract_wechat_url_token(row.get("url", "")) or "").strip()
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+def is_high_value_practical_example(item):
+    url = str((item or {}).get("url", "") or "")
+    return _url_has_token(url, HIGH_VALUE_PRACTICAL_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens())
+
+
 def build_item_visible_text(item):
     parts = [
         item.get("title", ""),
@@ -2541,9 +2839,11 @@ def is_visible_ai_audio_candidate(item):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
-        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音)"
-        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音).{0,12}AI"
+        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase)"
+        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase).{0,12}AI"
         r"|音乐生成|音频生成|语音模型|语音识别|语音合成|文本转语音|转写"
+        r"|AI音乐|AI编曲|AI混音|AI音效|AI旋律|AI和声|AI和弦"
+        r"|全双工语音|语音交互|统一生成语音|统一生成语音、音乐与音效|UniSonate|PersonaPlex"
         r"|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-Omni|Audio-Cogito|Audio-DeepThinker"
         r"|ACE Studio|\bSuno\b|\bUdio\b|ElevenLabs|Step Audio|听觉大模型",
         text,
@@ -2553,16 +2853,17 @@ def is_visible_ai_audio_candidate(item):
 
 def is_high_value_audio_example(item):
     url = str((item or {}).get("url", "") or "")
-    if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS):
+    if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens(audio_only=True)):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
-        r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音)"
+        r"AI音频.{0,20}(工作流|创作|应用|案例|工具|教程|实战|配音|音乐|播客|声音|旋律|和声|和弦|音效|编曲|混音|效果器)"
         r"|音频.{0,20}(AI|智能体|大模型).{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
-        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战|体验|实测|可用)"
+        r"|音乐生成.{0,20}(工作流|创作|应用|案例|工具|教程|实战|体验|实测|可用|旋律|和声|和弦|编曲|混音)"
         r"|AI音乐.{0,30}(社区|写歌|创作|工具|应用|体验|实测|可用|案例)"
-        r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例|旋律|和声|和弦|编曲)"
         r"|AI.{0,12}(配乐|配音|音效|声音|音乐).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI.{0,12}(旋律|和声|和弦|音符|编曲|混音|效果器|reaper|wwise|criware|logic|cubase).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
         r"|配音.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
         r"|播客.{0,20}(工作流|创作|应用|案例|工具|教程|实战)",
         text,
@@ -3884,6 +4185,8 @@ def practical_keyword_gate(item):
     core_text = build_item_filter_text(item, include_query=False)
     support_text = build_item_filter_text(item, include_query=True)
 
+    if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
+        return True
     if EXCLUDE_PATTERN.search(support_text):
         return False
     if is_non_actionable_page(item):
@@ -3899,6 +4202,11 @@ def practical_keyword_gate(item):
     return True
 
 
+def is_audio_promo_or_training_ad(item):
+    text = build_item_filter_text(item, include_query=True)
+    return bool(PROMO_TRAINING_FILTER.search(text) or is_known_low_value_url(item))
+
+
 def is_audio_special_item(item):
     text = build_item_filter_text(item, include_query=True)
     if is_high_value_audio_example(item):
@@ -3908,7 +4216,8 @@ def is_audio_special_item(item):
     return bool(
         re.search(
             r"音频|语音|voice|speech|podcast|播客|music|sound|asr|tts|配音|降噪|混音|母带|game audio|wwise|fmod|suno|elevenlabs|descript|audiocraft"
-            r"|ai音乐|音乐生成|配乐|音效|audio-omni|vibevoice|ace studio",
+            r"|ai音乐|音乐生成|配乐|音效|旋律|和声|和弦|音符|编曲|效果器|reaper|criware|logic|cubase|audio-omni|vibevoice|ace studio"
+            r"|全双工|语音交互|UniSonate|PersonaPlex",
             text,
             re.IGNORECASE,
         )
@@ -3920,9 +4229,9 @@ def classify_audio_topic(item):
     rules = [
         (r"播客|podcast|rss|节目", "播客"),
         (r"配音|voice|speech|tts|asr|转写|字幕|语音", "语音"),
-        (r"music|音乐|作曲|soundtrack|suno|udio|audiocraft", "音乐"),
-        (r"game audio|游戏音频|wwise|fmod|unity|unreal|sound design", "游戏音频"),
-        (r"workflow|工作流|automation|agent|plugin|vst|daw|tool|工具|descript|elevenlabs", "工具/工作流"),
+        (r"music|音乐|作曲|旋律|和声|和弦|音符|编曲|soundtrack|suno|udio|audiocraft", "音乐"),
+        (r"game audio|游戏音频|wwise|fmod|criware|unity|unreal|sound design", "游戏音频"),
+        (r"workflow|工作流|automation|agent|plugin|vst|daw|tool|工具|效果器|reaper|logic|cubase|descript|elevenlabs", "工具/工作流"),
     ]
     for pattern, label in rules:
         if re.search(pattern, text, re.IGNORECASE):
@@ -3938,7 +4247,7 @@ def audio_editorial_excluded(item):
         r"|全网首发|无限用|最长\d+秒视频|参考图|剧情等生成",
         text,
         re.IGNORECASE,
-    ))
+    ) or is_audio_promo_or_training_ad(item))
 
 
 def is_business_finance_noise(item):
@@ -3971,8 +4280,10 @@ def audio_editorial_core_hit(item):
     text = " ".join(str(item.get(k, "") or "") for k in ("title", "title_zh")).strip()
     return bool(re.search(
         r"音频|语音|转写|配音|配音效|配乐|音效|音频生成|音乐生成|空间音频|实时交互|声音|声场|声学"
+        r"|旋律|和声|和弦|音符|编曲|混音|母带|效果器"
         r"|文本转语音|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-|ACE Studio|Steinberg|Cubase|Nuendo|SpectraLayers|UAD"
-        r"|\bDAW\b|\bVST\b|Fairlight|voice|speech|audio|sound design|dubbing",
+        r"|\bDAW\b|\bVST\b|\bMIDI\b|REAPER|Wwise|CRIWARE|Logic|Fairlight|voice|speech|audio|sound design|dubbing"
+        r"|全双工|语音交互|UniSonate|PersonaPlex",
         text,
         re.IGNORECASE,
     ))
@@ -3993,9 +4304,9 @@ def audio_editorial_priority(item):
     if audio_editorial_excluded(item):
         return False
     strong_hit = bool(re.search(
-        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|音频生成|音乐生成|空间音频|实时交互"
+        r"语音模型|语音识别|语音合成|文本转语音|\bTTS\b|\bASR\b|转写|配音效|AI\s*配乐|AI\s*音效|AI\s*编曲|AI\s*混音|AI\s*旋律|AI\s*和声|AI\s*和弦|音频生成|音乐生成|空间音频|实时交互"
         r"|实时响应|听觉大模型|音频大模型|音频理解|音频编辑|功能更新|框架|Audio-Omni|Audio-Cogito|Vibe[Vv]oice"
-        r"|SOTA|成本下降|定价骤减|降价|一统|大一统",
+        r"|REAPER|Wwise|CRIWARE|Logic|Cubase|UniSonate|PersonaPlex|全双工|语音交互|SOTA|成本下降|定价骤减|降价|一统|大一统",
         text,
         re.IGNORECASE,
     ))
@@ -5890,7 +6201,7 @@ def practical_relevance_score(item):
         score += 4
     if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
         score += 2
-    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         score += 2
     if ORDINARY_HINT_PATTERN.search(support_text):
         score += 2
@@ -5904,6 +6215,8 @@ def practical_relevance_score(item):
         score += 3
     if get_wechat_account_hint(item):
         score += 2
+    if is_high_value_practical_example(item):
+        score += 8
 
     if LOW_VALUE_SIGNAL.search(text):
         score -= 3
@@ -5935,12 +6248,14 @@ def audio_relevance_score(item):
     strong_terms = [
         r"音频", r"语音", r"voice", r"speech", r"配音", r"dubbing", r"播客", r"podcast",
         r"asr", r"tts", r"转写", r"字幕", r"降噪", r"denoise", r"混音", r"母带",
-        r"music", r"音乐", r"sound design", r"soundtrack", r"game audio", r"游戏音频",
+        r"music", r"音乐", r"旋律", r"和声", r"和弦", r"音效", r"音符", r"编曲",
+        r"sound design", r"soundtrack", r"game audio", r"游戏音频",
     ]
     practical_terms = [
         r"workflow", r"工作流", r"教程", r"实战", r"案例", r"指南", r"部署", r"集成",
         r"plugin", r"vst", r"daw", r"automation", r"agent", r"智能体", r"runway",
-        r"elevenlabs", r"suno", r"descript", r"udio", r"audiocraft",
+        r"elevenlabs", r"suno", r"descript", r"udio", r"audiocraft", r"效果器",
+        r"reaper", r"wwise", r"criware", r"logic", r"cubase", r"midi",
     ]
     for pat in strong_terms:
         if re.search(pat, text, re.IGNORECASE):
@@ -5948,13 +6263,29 @@ def audio_relevance_score(item):
     for pat in practical_terms:
         if re.search(pat, text, re.IGNORECASE):
             score += 1
-    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI"}:
+    if item.get("source") in {"Audio/Music/Game AI", "Audio Creator AI", "AI Audio Discovery"}:
         score += 3
     if item.get("is_video"):
         score += 1
     if is_high_value_audio_example(item):
         score = max(score, 8)
     return score
+
+
+def is_wechat_audio_priority_item(item):
+    if item.get("source") != WECHAT_SOURCE_NAME:
+        return False
+    if is_high_value_audio_example(item):
+        return True
+    if not is_audio_special_item(item):
+        return False
+    if item.get("account_name") in WECHAT_AUDIO_FOCUS_ACCOUNTS:
+        return True
+    return (
+        audio_relevance_score(item) >= 2
+        or audio_editorial_core_hit(item)
+        or audio_editorial_priority(item)
+    )
 
 
 def pool_bucket(item):
@@ -5991,6 +6322,8 @@ def is_practical_candidate(item):
     """
     text = build_item_filter_text(item, include_query=False)
     support_text = build_item_filter_text(item, include_query=True)
+    if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
+        return True
     practical_hit = bool(PRACTICAL_SIGNAL.search(text))
     experience_hit = bool(PRACTICAL_EXPERIENCE_SIGNAL.search(support_text))
     reusable_hit = bool(REUSABLE_SIGNAL.search(text))
@@ -6025,7 +6358,7 @@ def is_practical_candidate(item):
 
 def allowed_item_age_hours(item):
     source = item.get("source", "")
-    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
+    if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "AI Audio Discovery", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
         return 24 * 7
     if item.get("is_video"):
         platform = str(item.get("platform", "")).lower()
@@ -6058,6 +6391,9 @@ def quality_filter(items):
         text = f"{title} {summary}"
 
         if is_known_deleted_url(item):
+            continue
+        if is_known_low_value_url(item) or PROMO_TRAINING_FILTER.search(build_item_filter_text(item, include_query=True)):
+            non_tech_filtered_count += 1
             continue
         if HARD_BLOCK_DOMAINS.search(url):
             continue
@@ -6157,9 +6493,10 @@ def quality_filter(items):
         item["practical_score"] = pscore
         item["audio_score"] = audio_relevance_score(item)
         high_value_audio = is_high_value_audio_example(item)
+        high_value_practical = is_high_value_practical_example(item)
         if PRACTICAL_STRICT_ONLY:
             item_pool = pool_bucket(item)
-            if high_value_audio and item_pool == "DROP":
+            if (high_value_audio or high_value_practical) and item_pool == "DROP":
                 item_pool = "A"
             item["_pool"] = item_pool
             if item_pool == "DROP":
@@ -6171,11 +6508,11 @@ def quality_filter(items):
             dynamic_threshold = PRACTICAL_MIN_SCORE
             if frontier_innovation_gate(item):
                 dynamic_threshold = max(1, PRACTICAL_MIN_SCORE - 1)
-            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials", WECHAT_SOURCE_NAME}:
+            if item.get("source") in {"Practical Guides", "Agent/Coding AI", "Audio Creator AI", "AI Audio Discovery", "Audio/Music/Game AI", "AI Frontier", "Video Tutorials", WECHAT_SOURCE_NAME}:
                 dynamic_threshold = max(1, dynamic_threshold - 1)
             if item_pool == "B":
                 dynamic_threshold = max(1, dynamic_threshold - 1)
-            if high_value_audio and pscore < dynamic_threshold:
+            if (high_value_audio or high_value_practical) and pscore < dynamic_threshold:
                 item["practical_score"] = dynamic_threshold
                 pscore = dynamic_threshold
             if pscore < dynamic_threshold and item_pool != "B":
@@ -6217,6 +6554,8 @@ def calculate_heat_score(item):
         heat = base_score
     else:
         heat = SOURCE_WEIGHT.get(source, 50)
+        if is_wechat_audio_priority_item(item):
+            heat = max(heat, WECHAT_AUDIO_SOURCE_WEIGHT)
 
     if TECH_BOOST.search(text):
         heat += 20
@@ -6228,10 +6567,14 @@ def calculate_heat_score(item):
         heat += 25
     if re.search(r"\b(skill|skills|agent|agentic|workflow|tutorial|how.to)\b|教程|实战|工作流|智能体", text, re.IGNORECASE):
         heat += 18
-    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|混音|母带|转写", text, re.IGNORECASE):
+    if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         heat += 22
     if is_high_value_audio_example(item):
         heat += 80
+    if is_high_value_practical_example(item):
+        heat += 55
+    if is_wechat_audio_priority_item(item):
+        heat += 18
     if item.get("is_priority_wechat"):
         heat += 20
     if get_wechat_account_hint(item):
@@ -6396,8 +6739,16 @@ def deduplicate_and_rank(all_items, review_mode=False):
 
     if review_mode:
         limit = max(REVIEW_CANDIDATE_MAX, MIN_ITEMS)
-        review_candidates = deduped[:limit]
-        print(f"      [v3.9] 审核候选池: {len(review_candidates)} 条")
+        review_candidates = select_source_balanced_items(
+            deduped,
+            limit=limit,
+            default_max=REVIEW_MAX_PER_SOURCE,
+            wechat_max=REVIEW_WECHAT_MAX,
+        )
+        print(
+            f"      [v3.9] 审核候选池: {len(review_candidates)} 条 "
+            f"(来源: {source_mix_text(review_candidates)})"
+        )
         return review_candidates
     return enforce_diversity_with_pool(deduped)
 
@@ -6450,6 +6801,63 @@ def enforce_diversity(items):
     final.sort(key=lambda x: x.get("heat_score", 0), reverse=True)
 
     return final[:MAX_ITEMS]
+
+
+def source_mix_text(items, max_parts=8):
+    counts = {}
+    for item in items or []:
+        src = item.get("source", "未知来源")
+        counts[src] = counts.get(src, 0) + 1
+    parts = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    text = " / ".join(f"{src} {count}" for src, count in parts[:max_parts])
+    if len(parts) > max_parts:
+        text += f" / 其他 {sum(count for _, count in parts[max_parts:])}"
+    return text or "无"
+
+
+def source_cap_for_item(item, default_max, wechat_max):
+    src = item.get("source")
+    if src == WECHAT_SOURCE_NAME:
+        return max(0, wechat_max)
+    return max(0, default_max)
+
+
+def select_source_balanced_items(items, limit, default_max, wechat_max, preserve_order=False):
+    if not items:
+        return []
+    limit = min(limit or len(items), len(items))
+    if preserve_order:
+        ordered = sorted(
+            items,
+            key=lambda x: (
+                int(x.get("_review_rank", 10**6)),
+                -float(x.get("heat_score", 0) or 0),
+            ),
+        )
+    else:
+        ordered = sorted(
+            items,
+            key=lambda x: (
+                float(x.get("heat_score", 0) or 0),
+                float(x.get("audio_score", 0) or 0),
+                float(x.get("practical_score", 0) or 0),
+                float(x.get("_completeness", 0) or 0),
+            ),
+            reverse=True,
+        )
+
+    selected = []
+    counts = {}
+    for item in ordered:
+        src = item.get("source", "")
+        cap = source_cap_for_item(item, default_max, wechat_max)
+        if counts.get(src, 0) >= cap:
+            continue
+        selected.append(item)
+        counts[src] = counts.get(src, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def enforce_diversity_with_pool(items):
@@ -6697,7 +7105,7 @@ TAG_RULES = [
      "大模型", "tag-llm", "\U0001f916"),
     (re.compile(r"教程|实战|部署|接入|workflow|agent|RAG|自动化|复用|模板|api|sdk|落地|案例", re.I),
      "实用", "tag-product", "\U0001f6e0\ufe0f"),
-    (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|混音|母带|转写", re.I),
+    (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|midi|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", re.I),
      "音频AI", "tag-product", "\U0001f3a7"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
@@ -6752,7 +7160,7 @@ def is_ai_special_tab_item(item):
         return True
     if source in {
         "Practical Guides", "Agent/Coding AI", "Audio Creator AI",
-        "Audio/Music/Game AI", "AI Frontier", WECHAT_SOURCE_NAME,
+        "Audio/Music/Game AI", "AI Audio Discovery", "AI Frontier", WECHAT_SOURCE_NAME,
     }:
         return True
     if category in {"开源", "技术突破", "应用落地", "研究"}:
@@ -7320,13 +7728,21 @@ def build_review_feedback_records(all_review_items, selected_items):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_feishu_card(items, date_str, audio_source_items=None):
-    feishu_items = sorted(
+    ranked_feishu_items = sorted(
         items,
         key=lambda x: (
             int(x.get("_review_rank", 10**6)),
             -float(x.get("heat_score", 0) or 0),
         ),
-    )[:FEISHU_TOP_N]
+    )
+    feishu_items = select_source_balanced_items(
+        ranked_feishu_items,
+        limit=FEISHU_TOP_N,
+        default_max=FEISHU_MAX_PER_SOURCE,
+        wechat_max=FEISHU_WECHAT_MAX,
+        preserve_order=True,
+    )
+    print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
     audio_source_items = audio_source_items if audio_source_items is not None else items
     audio_candidates = select_audio_review_candidates(
         audio_source_items,
@@ -7494,6 +7910,184 @@ def push_review_link_to_feishu(review_url, total_count, audio_count):
     print(f"      审核页仅本地打开，不发送飞书提醒: {review_url}")
     return False
 
+
+def _decode_wechat_js_value(value):
+    value = str(value or "").strip()
+    value = value.replace("\\x26", "&").replace("\\/", "/")
+    return unescape(value).strip()
+
+
+def parse_wechat_sample_page(url):
+    resp = safe_request(url, timeout=max(15, ARTICLE_FETCH_TIMEOUT), trust_env=True)
+    if not resp:
+        return None
+    html_text = resp.text or ""
+
+    def first_match(patterns):
+        for pattern in patterns:
+            m = re.search(pattern, html_text, re.IGNORECASE | re.DOTALL)
+            if m:
+                return _decode_wechat_js_value(m.group(1))
+        return ""
+
+    title = first_match([
+        r"title:\s*JsDecode\('([^']*)'\)",
+        r'<meta\s+property="og:title"\s+content="(.*?)"',
+        r"var\s+msg_title\s*=\s*'([^']*)'",
+        r'var\s+msg_title\s*=\s*"([^"]*)"',
+    ])
+    summary = first_match([
+        r"desc:\s*JsDecode\('([^']*)'\)",
+        r'<meta\s+name="description"\s+content="(.*?)"',
+        r'<meta\s+property="og:description"\s+content="(.*?)"',
+    ])
+    account_name = first_match([
+        r"nick_name:\s*JsDecode\('([^']*)'\)",
+        r'id="js_name"[^>]*>\s*(.*?)\s*</a>',
+    ])
+    author = first_match([
+        r'<meta\s+name="author"\s+content="(.*?)"',
+        r'id="js_author_name_text"[^>]*>\s*(.*?)\s*</span>',
+    ])
+    publish_date = extract_page_published_date(url)
+    item = {
+        "url": url,
+        "canonical_url": canonicalize_url_for_history(resp.url or url),
+        "url_token": _extract_wechat_url_token(url),
+        "title": title,
+        "summary": summary,
+        "account_name": account_name,
+        "author": author,
+        "date": publish_date,
+        "source": WECHAT_SOURCE_NAME,
+        "source_type": "domestic",
+        "learned_at": _now_iso(),
+    }
+    item["is_audio"] = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item))
+    item["is_practical"] = bool(is_practical_candidate(item) or practical_keyword_gate(item))
+    item["terms"] = _extract_feedback_terms(item)
+    item["category"] = "AI音频" if item["is_audio"] else ("实践应用" if item["is_practical"] else "正样本")
+    return item
+
+
+def _load_positive_sample_library():
+    if not POSITIVE_SAMPLE_LIBRARY_FILE.exists():
+        return []
+    try:
+        data = json.loads(POSITIVE_SAMPLE_LIBRARY_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("samples", [])
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_positive_sample_library(samples):
+    POSITIVE_SAMPLE_LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"updated_at": _now_iso(), "samples": samples}
+    POSITIVE_SAMPLE_LIBRARY_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    global _POSITIVE_SAMPLE_CACHE
+    _POSITIVE_SAMPLE_CACHE = samples
+
+
+def _subscribe_learned_accounts(account_names):
+    account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
+    if not account_names:
+        return {"added": 0, "existing": 0, "failed": 0}
+    stats = {"added": 0, "existing": 0, "failed": 0}
+    for base in WERSS_BASES:
+        token = _werss_login(base)
+        if not token:
+            continue
+        existing = _werss_existing_subscriptions(base, token)
+        for account in account_names:
+            if account.lower() in existing:
+                stats["existing"] += 1
+                continue
+            ok, info = _werss_subscribe_account(base, token, account)
+            if ok:
+                stats["added"] += 1
+                existing[account.lower()] = {"mp_name": info}
+            else:
+                stats["failed"] += 1
+        return stats
+    stats["failed"] += len(account_names)
+    return stats
+
+
+def learn_positive_samples_only():
+    if not POSITIVE_SAMPLE_INBOX_FILE.exists():
+        try:
+            POSITIVE_SAMPLE_INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+            POSITIVE_SAMPLE_INBOX_FILE.write_text(
+                "# 一行一个微信公众号文章链接。运行：python AI-m-OK.py --learn-samples\n",
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[ERROR] 无法创建样例入口文件: {POSITIVE_SAMPLE_INBOX_FILE} ({e})")
+            return
+        print(f"[INFO] 已创建样例入口文件: {POSITIVE_SAMPLE_INBOX_FILE}")
+        print("[INFO] 把 mp.weixin.qq.com/s/... 链接粘进去后，再运行 --learn-samples。")
+        return
+
+    raw_lines = POSITIVE_SAMPLE_INBOX_FILE.read_text(encoding="utf-8").splitlines()
+    urls = []
+    passthrough = []
+    for line in raw_lines:
+        stripped = line.strip()
+        found = re.findall(r"https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_\-]+", stripped)
+        if found:
+            urls.extend(found)
+        elif stripped and not stripped.startswith("#"):
+            passthrough.append(line)
+
+    urls = list(dict.fromkeys(urls))
+    if not urls:
+        print(f"[INFO] 没有发现待学习的微信公众号链接: {POSITIVE_SAMPLE_INBOX_FILE}")
+        return
+
+    library = _load_positive_sample_library()
+    by_key = {
+        canonicalize_url_for_history(row.get("url", "")) or row.get("url_token", ""): row
+        for row in library
+        if isinstance(row, dict)
+    }
+    learned = []
+    failed = []
+    for url in urls:
+        print(f"  学习样例: {url}")
+        try:
+            row = parse_wechat_sample_page(url)
+        except Exception as e:
+            print(f"    [WARN] 解析失败: {e}")
+            row = None
+        if not row or not row.get("title"):
+            print("    [WARN] 未能解析标题，保留在待学习文件中。")
+            failed.append(url)
+            continue
+        key = row.get("canonical_url") or canonicalize_url_for_history(row.get("url", "")) or row.get("url_token")
+        by_key[key] = row
+        learned.append(row)
+        print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')} | {row.get('title')}")
+
+    _save_positive_sample_library(list(by_key.values()))
+    sub_stats = _subscribe_learned_accounts([row.get("account_name", "") for row in learned])
+    if learned:
+        with open(POSITIVE_SAMPLE_LEARNED_FILE, "a", encoding="utf-8") as f:
+            for row in learned:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    remaining = passthrough + failed
+    POSITIVE_SAMPLE_INBOX_FILE.write_text(
+        ("\n".join(remaining).strip() + "\n") if remaining else "",
+        encoding="utf-8",
+    )
+    audio_count = sum(1 for row in learned if row.get("is_audio"))
+    print(f"\n[OK] 样例学习完成: 新学习 {len(learned)} 条, AI音频 {audio_count} 条, 失败 {len(failed)} 条")
+    print(f"[OK] 正样本库: {POSITIVE_SAMPLE_LIBRARY_FILE}")
+    print(f"[OK] WeRSS 订阅: 新增 {sub_stats['added']} 个, 已有 {sub_stats['existing']} 个, 失败 {sub_stats['failed']} 个")
+    print("[INFO] 只学习模式不会生成审核页，也不会推送飞书。")
+
+
 def publish_to_pages(html_content, date_str):
     try:
         pages = PAGES_DIR
@@ -7651,6 +8245,7 @@ def main():
     practical_guides = fetch_practical_guides()
     agent_guides = fetch_agent_coding_guides()
     audio_creator_guides = fetch_audio_creator_guides()
+    audio_discovery_guides = fetch_ai_audio_discovery_sources()
     ai_frontier = fetch_ai_frontier()
 
     print("\n🏮 [Phase C] 国内权威媒体抓取...")
@@ -7678,7 +8273,7 @@ def main():
     all_items = (
         tldr + hn + wired +
         tc + tv + ars + vb + mit + ieee +
-        yt + bz + wx_articles + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + ai_frontier +
+        yt + bz + wx_articles + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + audio_discovery_guides + ai_frontier +
         jqzx + qb + kr + ith + xzy + iq +
         sina + tt + pp +
         supp_intl + supp_domestic
@@ -7690,6 +8285,7 @@ def main():
     review_seed_items = deduplicate_and_rank(all_items, review_mode=True)
     audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
     audio_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items])
+    audio_discovery_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items if it.get("_audio_discovery")])
     audio_review_seed = deduplicate_and_rank(audio_review_pool, review_mode=True) if audio_review_pool else []
     audio_injected = []
     final_urls = {
@@ -7709,6 +8305,7 @@ def main():
     print(f"      After dedup + diversity + heat sort + filters: {len(final)}")
     print(f"      Audio special pool: {len(audio_special_pool)}")
     print(f"      Audio review pool: {len(audio_review_pool)}")
+    print(f"      Audio discovery review pool: {len(audio_discovery_review_pool)}")
     if audio_injected:
         print(f"      Audio injected for review/push: {len(audio_injected)}")
 
@@ -7732,6 +8329,69 @@ def main():
         if sum(1 for it in review_candidates if is_audio_special_item(it)) >= max(MIN_AUDIO_REVIEW_CHOICES, 3):
             break
 
+    target_audio_choices = max(MIN_AUDIO_REVIEW_CHOICES, MIN_AUDIO_DISCOVERY_REVIEW_CHOICES)
+    audio_backfill_added = 0
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        for item in audio_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        for item in audio_discovery_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
+
+    review_candidates = select_source_balanced_items(
+        review_candidates,
+        limit=max(REVIEW_CANDIDATE_MAX, target_audio_choices),
+        default_max=REVIEW_MAX_PER_SOURCE,
+        wechat_max=REVIEW_WECHAT_MAX,
+    )
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
+        review_urls = {
+            str(it.get("url", "")).rstrip("/")
+            for it in review_candidates
+            if it.get("url")
+        }
+        for item in audio_review_pool + audio_discovery_review_pool:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            audio_backfill_added += 1
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= target_audio_choices:
+                break
+    min_visible_audio = min(3, len(audio_review_seed))
+    if sum(1 for it in review_candidates if is_audio_special_item(it)) < min_visible_audio:
+        review_urls = {
+            str(it.get("url", "")).rstrip("/")
+            for it in review_candidates
+            if it.get("url")
+        }
+        for item in audio_review_seed:
+            url = str(item.get("url", "")).rstrip("/")
+            if not url or url in review_urls:
+                continue
+            review_candidates.append(dict(item))
+            review_urls.add(url)
+            if sum(1 for it in review_candidates if is_audio_special_item(it)) >= min_visible_audio:
+                break
+    if audio_backfill_added:
+        print(f"      [v4.1] AI音频候选补位: {audio_backfill_added} 条，目标至少 {target_audio_choices} 条")
+    print(f"      [v4.0] 审核页来源配比: {source_mix_text(review_candidates)}")
+
     review_candidates = generate_chinese_summaries(review_candidates)
     review_candidates = filter_inaccessible_items(review_candidates)
     final_urls_after_summary = {
@@ -7754,6 +8414,7 @@ def main():
      # ══════════════════════════════════════════════════════════════
     # ★ 人工审核为飞书推送前的硬约束
     # ══════════════════════════════════════════════════════════════
+    review_feedback_records = []
     if start_review_server is not None:
         print("\n🔍 [Phase F.5] 启动本地审核页面...")
         final = start_review_server(
@@ -7768,7 +8429,7 @@ def main():
             print("[INFO] 所有条目被过滤或用户取消，本次不推送。")
             return
         print(f"      审核后保留 {len(final)} 条，继续推送流程...")
-        append_review_feedback(build_review_feedback_records(review_candidates, final))
+        review_feedback_records = build_review_feedback_records(review_candidates, final)
     elif start_review_server is None:
         print("\n[ERROR] 未找到 review_server.py，人工审核不可用，本次不推送飞书。")
         return
@@ -7805,11 +8466,12 @@ def main():
         for it in final:
             pushed_history_keys.update(history_keys_from_item(it))
         save_history(pushed_history_keys)
+        append_review_feedback(review_feedback_records)
         print(
             f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, 去重键 {len(pushed_history_keys)} 条，后续将避免重复推送。"
         )
     else:
-        print("      飞书推送未成功，本次不写入历史，避免审核过但未送达的内容被误去重。")
+        print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
 
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
     dom_final = sum(1 for it in final if it.get("source_type") == "domestic")
@@ -7819,5 +8481,8 @@ def main():
     print(f"{'='*60}\n")
 
 if __name__ == "__main__":
-    main()
+    if "--learn-samples" in sys.argv:
+        learn_positive_samples_only()
+    else:
+        main()
 
