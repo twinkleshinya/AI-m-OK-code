@@ -267,6 +267,7 @@ KNOWN_DELETED_URL_TOKENS = {
 }
 KNOWN_LOW_VALUE_URL_TOKENS = {
     "B0tN5EMv0nxOVZbjUSZ0EQ",
+    "tools/music/yinshu",
 }
 HIGH_VALUE_AUDIO_URL_TOKENS = {
     "4TfXl9d0ohiCyBfdVpRB8w",
@@ -544,6 +545,7 @@ INVESTMENT_URL_FILTER = re.compile(
 PRODUCT_LANDING_FILTER = re.compile(
     r"coze\.cn|coze\.com"
     r"|overview\?utm_"
+    r"|aihub\.cn/(?:tools|go)/"
     r"|/product[s]?[/\?]"
     r"|/pricing[/\?]"
     r"|/landing[/\?]"
