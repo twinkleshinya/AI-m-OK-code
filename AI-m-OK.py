@@ -1220,6 +1220,39 @@ def history_keys_from_item(item):
     return keys
 
 
+def history_keys_from_feedback_record(row):
+    keys = set()
+    url_key = canonicalize_url_for_history(row.get("url", ""))
+    if url_key:
+        keys.add(f"url::{url_key}")
+    title_key = normalize_title_key(row.get("title_zh") or row.get("title") or "")
+    if title_key:
+        keys.add(f"title::{title_key}")
+    product_key = str(row.get("product_key", "") or "").strip()
+    if product_key:
+        keys.add(product_key)
+    event_fp = str(row.get("event_fingerprint", "") or "").strip()
+    if event_fp:
+        keys.add(f"event::{event_fp}")
+    return keys
+
+
+def item_hits_history(item, history_keys):
+    history_keys = history_keys or set()
+    canonical_url = canonicalize_url_for_history(item.get("url", ""))
+    title_key = normalize_title_key(item.get("title_zh") or item.get("title") or "")
+    fp = extract_content_fingerprint(item)
+    event_fp = extract_event_fingerprint(item)
+    product_key = extract_product_dedup_key(item)
+    return any((
+        bool(canonical_url and f"url::{canonical_url}" in history_keys),
+        bool(title_key and f"title::{title_key}" in history_keys),
+        bool(fp and f"fp::{fp}" in history_keys),
+        bool(event_fp and f"event::{event_fp}" in history_keys),
+        bool(product_key and product_key in history_keys),
+    ))
+
+
 def _normalize_history_entries(raw_data):
     entries = raw_data if isinstance(raw_data, list) else []
     normalized = set()
@@ -1458,6 +1491,8 @@ def build_feedback_profile(limit=1200):
         "account_bias": {},
         "negative_reason_counts": {},
         "rejected_urls": set(),
+        "rejected_title_keys": set(),
+        "rejected_product_keys": set(),
         "rejected_event_fingerprints": set(),
     }
     for row in rows:
@@ -1480,9 +1515,14 @@ def build_feedback_profile(limit=1200):
         product_key = str(row.get("product_key", "") or "").strip()
         event_fp = str(row.get("event_fingerprint", "") or "").strip()
         url_key = canonicalize_url_for_history(row.get("url", ""))
+        title_key = normalize_title_key(row.get("title_zh") or row.get("title") or "")
         if row.get("selected") is False:
             if url_key:
                 profile["rejected_urls"].add(url_key)
+            if title_key:
+                profile["rejected_title_keys"].add(title_key)
+            if product_key:
+                profile["rejected_product_keys"].add(product_key)
             if event_fp:
                 profile["rejected_event_fingerprints"].add(event_fp)
         if source:
@@ -1540,7 +1580,12 @@ def should_filter_by_feedback_profile(item, profile=None):
     product_key = extract_product_dedup_key(item)
     event_fp = extract_event_fingerprint(item)
     url_key = canonicalize_url_for_history(item.get("url", ""))
+    title_key = normalize_title_key(item.get("title_zh") or item.get("title") or "")
     if url_key and url_key in profile.get("rejected_urls", set()):
+        return True
+    if title_key and title_key in profile.get("rejected_title_keys", set()):
+        return True
+    if product_key and product_key in profile.get("rejected_product_keys", set()):
         return True
     if event_fp and event_fp in profile.get("rejected_event_fingerprints", set()):
         return True
@@ -6580,9 +6625,9 @@ def calculate_heat_score(item):
 
     return heat
 
-def deduplicate_and_rank(all_items, review_mode=False):
+def deduplicate_and_rank(all_items, review_mode=False, history_keys=None, feedback_profile=None):
     items = quality_filter(all_items)
-    feedback_profile = build_feedback_profile()
+    feedback_profile = feedback_profile or build_feedback_profile()
     feedback_filtered_count = 0
     scored_items = []
 
@@ -6619,7 +6664,7 @@ def deduplicate_and_rank(all_items, review_mode=False):
     ]
 
     # ── 加载历史记录，进行隔日去重 ──
-    history_keys = load_history()
+    history_keys = history_keys if history_keys is not None else load_history()
     seen_urls = set()
     seen_titles = []
     seen_fingerprints = {}
@@ -6644,17 +6689,7 @@ def deduplicate_and_rank(all_items, review_mode=False):
 
         if not title:
             continue
-        history_hit = False
-        if canonical_url and f"url::{canonical_url}" in history_keys:
-            history_hit = True
-        if title_key and f"title::{title_key}" in history_keys:
-            history_hit = True
-        if fp and f"fp::{fp}" in history_keys:
-            history_hit = True
-        if event_fp and f"event::{event_fp}" in history_keys:
-            history_hit = True
-        if product_key and product_key in history_keys:
-            history_hit = True
+        history_hit = item_hits_history(item, history_keys)
         if canonical_url in seen_urls or history_hit:
             continue
 
@@ -8312,13 +8347,30 @@ def main():
     )
     print(f"      Total raw: {len(all_items)}")
 
+    history_keys = load_history()
+    feedback_profile = build_feedback_profile()
     quality_passed_items = quality_filter([dict(it) for it in all_items])
-    final = deduplicate_and_rank(all_items)
-    review_seed_items = deduplicate_and_rank(all_items, review_mode=True)
-    audio_special_pool = select_audio_special_items([dict(it) for it in quality_passed_items])
-    audio_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items])
-    audio_discovery_review_pool = select_audio_review_candidates([dict(it) for it in quality_passed_items if it.get("_audio_discovery")])
-    audio_review_seed = deduplicate_and_rank(audio_review_pool, review_mode=True) if audio_review_pool else []
+    fresh_quality_items = []
+    handled_filtered_count = 0
+    for item in quality_passed_items:
+        if item_hits_history(item, history_keys) or should_filter_by_feedback_profile(item, feedback_profile):
+            handled_filtered_count += 1
+            continue
+        fresh_quality_items.append(item)
+    if handled_filtered_count:
+        print(f"      [v4.2] 已推送/审核未选历史过滤: {handled_filtered_count} 条")
+
+    final = deduplicate_and_rank(all_items, history_keys=history_keys, feedback_profile=feedback_profile)
+    review_seed_items = deduplicate_and_rank(all_items, review_mode=True, history_keys=history_keys, feedback_profile=feedback_profile)
+    audio_special_pool = select_audio_special_items([dict(it) for it in fresh_quality_items])
+    audio_review_pool = select_audio_review_candidates([dict(it) for it in fresh_quality_items])
+    audio_discovery_review_pool = select_audio_review_candidates([dict(it) for it in fresh_quality_items if it.get("_audio_discovery")])
+    audio_review_seed = deduplicate_and_rank(
+        audio_review_pool,
+        review_mode=True,
+        history_keys=history_keys,
+        feedback_profile=feedback_profile,
+    ) if audio_review_pool else []
     audio_injected = []
     final_urls = {
         str(it.get("url", "")).rstrip("/")
@@ -8507,10 +8559,16 @@ def main():
         pushed_history_keys = set()
         for it in final:
             pushed_history_keys.update(history_keys_from_item(it))
-        save_history(pushed_history_keys)
+        unselected_history_keys = set()
+        for row in review_feedback_records:
+            if row.get("selected") is False:
+                unselected_history_keys.update(history_keys_from_feedback_record(row))
+        save_history(pushed_history_keys | unselected_history_keys)
         append_review_feedback(review_feedback_records)
         print(
-            f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, 去重键 {len(pushed_history_keys)} 条，后续将避免重复推送。"
+            f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, "
+            f"已推送去重键 {len(pushed_history_keys)} 条, "
+            f"审核未选排除键 {len(unselected_history_keys)} 条，后续将避免重复筛出。"
         )
     else:
         print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
