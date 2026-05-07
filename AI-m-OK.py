@@ -465,6 +465,7 @@ WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").str
 WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
+WERSS_STALE_BOOTSTRAP_LIMIT = int(os.environ.get("WERSS_STALE_BOOTSTRAP_LIMIT", str(max(WERSS_UPDATE_LIMIT, 24))))
 WERSS_SQLITE_PATH = os.environ.get("WERSS_SQLITE_PATH", "").strip()
 REQUEST_THROTTLE_MIN = float(os.environ.get("REQUEST_THROTTLE_MIN", "1.0"))
 REQUEST_THROTTLE_MAX = float(os.environ.get("REQUEST_THROTTLE_MAX", "2.0"))
@@ -3238,15 +3239,50 @@ def _werss_response_data(resp):
     return resp
 
 
+def _fetch_werss_subscription_rows(base, token, page_size=100, max_rows=500):
+    rows = []
+    seen_ids = set()
+    offset = 0
+    page_size = max(10, int(page_size or 100))
+    max_rows = max(page_size, int(max_rows or page_size))
+    while len(rows) < max_rows:
+        data = _werss_request_json(
+            base,
+            f"/api/v1/wx/mps?limit={page_size}&offset={offset}",
+            token=token,
+            timeout=max(10, LISTING_FETCH_TIMEOUT),
+        )
+        data = _werss_response_data(data)
+        if isinstance(data, dict):
+            page_rows = data.get("list") or data.get("items") or data.get("records") or []
+        elif isinstance(data, list):
+            page_rows = data
+        else:
+            page_rows = []
+        if not page_rows:
+            break
+        added = 0
+        for row in page_rows:
+            if not isinstance(row, dict):
+                continue
+            row_id = _werss_row_feed_id(row) or str(row.get("mp_name") or row.get("nickname") or "")
+            if row_id and row_id in seen_ids:
+                continue
+            if row_id:
+                seen_ids.add(row_id)
+            rows.append(row)
+            added += 1
+            if len(rows) >= max_rows:
+                break
+        if len(page_rows) < page_size or added == 0:
+            break
+        offset += page_size
+    return rows
+
+
 def _werss_existing_subscriptions(base, token):
     existing = {}
-    data = _werss_request_json(base, "/api/v1/wx/mps?limit=100&offset=0", token=token)
-    data = _werss_response_data(data)
-    rows = []
-    if isinstance(data, dict):
-        rows = data.get("list") or data.get("items") or data.get("records") or []
-    elif isinstance(data, list):
-        rows = data
+    rows = _fetch_werss_subscription_rows(base, token)
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -3512,25 +3548,30 @@ def _werss_row_recently_active(row, recent_days=None):
 def _refresh_werss_subscriptions(base, token):
     if not WERSS_UPDATE_BEFORE_FETCH:
         return {"updated": 0, "failed": 0, "skipped": 0}
-    data = _werss_request_json(base, "/api/v1/wx/mps?limit=100&offset=0", token=token)
-    data = _werss_response_data(data)
-    rows = []
-    if isinstance(data, dict):
-        rows = data.get("list") or []
-    elif isinstance(data, list):
-        rows = data
+    rows = _fetch_werss_subscription_rows(base, token)
     recent_rows = [row for row in rows if _werss_row_recently_active(row)]
     sorted_recent_rows = _priority_werss_rows(recent_rows)
-    if WERSS_UPDATE_ALL_RECENT:
+    stale_bootstrap = False
+    if sorted_recent_rows:
+        stale_bootstrap = False
+    elif rows:
+        # 微信授权失效一段时间后，库里 max_publish_time 会整体停在 7 天外。
+        # 此时“只刷新 7 天内活跃号”会把所有号都跳过，所以做一次重点号兜底刷新。
+        stale_bootstrap = True
+        sorted_recent_rows = _priority_werss_rows(rows)
+
+    if WERSS_UPDATE_ALL_RECENT and not stale_bootstrap:
         target_rows = sorted_recent_rows
     else:
-        target_rows = sorted_recent_rows[:max(0, WERSS_UPDATE_LIMIT)]
+        limit = WERSS_STALE_BOOTSTRAP_LIMIT if stale_bootstrap else WERSS_UPDATE_LIMIT
+        target_rows = sorted_recent_rows[:max(0, limit)]
     stats = {
         "updated": 0,
         "failed": 0,
         "skipped": max(0, len(rows) - len(target_rows)),
         "eligible": len(recent_rows),
         "all_recent": bool(WERSS_UPDATE_ALL_RECENT),
+        "stale_bootstrap": stale_bootstrap,
         "target_feed_ids": [_werss_row_feed_id(row) for row in target_rows if _werss_row_feed_id(row)],
     }
     for row in target_rows:
@@ -3580,7 +3621,10 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
                 )
             update_stats = _refresh_werss_subscriptions(base, token)
             if update_stats.get("eligible") or update_stats["updated"] or update_stats["failed"]:
-                refresh_mode = "全量刷新" if update_stats.get("all_recent") else f"限量刷新{WERSS_UPDATE_LIMIT}个"
+                if update_stats.get("stale_bootstrap"):
+                    refresh_mode = f"授权恢复兜底刷新{WERSS_STALE_BOOTSTRAP_LIMIT}个"
+                else:
+                    refresh_mode = "全量刷新" if update_stats.get("all_recent") else f"限量刷新{WERSS_UPDATE_LIMIT}个"
                 print(
                     f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
                     f"{refresh_mode}, 更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
