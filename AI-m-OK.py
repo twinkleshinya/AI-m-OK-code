@@ -136,6 +136,7 @@ DOMESTIC_RATIO_MAX = 0.55
 MIN_DOMESTIC_SUCCESS = 2
 MIN_INTL_SUCCESS = 3
 OLD_NEWS_HOURS = 72
+CURATED_SOURCE_MAX_AGE_DAYS = int(os.environ.get("CURATED_SOURCE_MAX_AGE_DAYS", "10"))
 MAX_FUNDING_POLICY = 2
 PRODUCT_HEAT_THRESHOLD = 90
 FEISHU_TOP_N = 15
@@ -2860,6 +2861,54 @@ def learned_positive_url_tokens(audio_only=False):
     return tokens
 
 
+def _positive_sample_to_item(row):
+    if not isinstance(row, dict):
+        return None
+    url = str(row.get("url") or "").strip()
+    title = str(row.get("title") or "").strip()
+    if not url or not title:
+        return None
+    item = _build_wechat_item(
+        source_name=WECHAT_SOURCE_NAME,
+        article_url=url,
+        title=title,
+        query="正样本学习库",
+        summary=str(row.get("summary") or "来自正样本学习库").strip(),
+        account_name=str(row.get("account_name") or "").strip(),
+    )
+    item["date"] = str(row.get("date") or row.get("learned_at") or _now_iso()).strip()
+    item["date_inferred"] = not bool(row.get("date"))
+    item["content_excerpt"] = str(row.get("content_excerpt") or row.get("summary") or "").strip()
+    item["is_positive_sample"] = True
+    item["is_priority_wechat"] = True
+    item["manual_category"] = str(row.get("manual_category") or row.get("category") or "").strip()
+    item["is_audio"] = bool(row.get("is_audio"))
+    item["is_practical"] = bool(row.get("is_practical"))
+    item["category"] = "AI音频" if item["is_audio"] else ("实践应用" if item["is_practical"] else "正样本")
+    item = _mark_social_item(item, platform="WeChat", is_video=False)
+    return item
+
+
+def fetch_positive_sample_items(max_items=80):
+    items = []
+    seen = set()
+    for row in load_positive_samples():
+        item = _positive_sample_to_item(row)
+        if not item:
+            continue
+        url = str(item.get("url", "")).rstrip("/")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        items.append(item)
+        if max_items and len(items) >= max_items:
+            break
+    if items:
+        audio_count = sum(1 for it in items if it.get("is_audio") or is_audio_special_item(it))
+        print(f"      [B.5] 正样本学习库注入: {len(items)} 条, AI音频 {audio_count} 条")
+    return items
+
+
 def is_high_value_practical_example(item):
     url = str((item or {}).get("url", "") or "")
     return _url_has_token(url, HIGH_VALUE_PRACTICAL_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens())
@@ -2876,6 +2925,10 @@ def build_item_visible_text(item):
 
 
 def is_visible_ai_audio_candidate(item):
+    if item and item.get("manual_category") == "AI音频":
+        return True
+    if item and item.get("is_positive_sample") and item.get("is_audio"):
+        return True
     if _url_has_token(str((item or {}).get("url", "") or ""), HIGH_VALUE_AUDIO_URL_TOKENS):
         return True
     text = build_item_visible_text(item)
@@ -2893,6 +2946,10 @@ def is_visible_ai_audio_candidate(item):
 
 
 def is_high_value_audio_example(item):
+    if item and item.get("manual_category") == "AI音频":
+        return True
+    if item and item.get("is_positive_sample") and item.get("is_audio"):
+        return True
     url = str((item or {}).get("url", "") or "")
     if _url_has_token(url, HIGH_VALUE_AUDIO_URL_TOKENS) or _url_has_token(url, learned_positive_url_tokens(audio_only=True)):
         return True
@@ -3380,7 +3437,7 @@ def _fetch_wechat_from_werss_sqlite(source_name, feed_ids=None, max_items=None):
         return []
 
     max_items = None if max_items in (None, 0) else max(1, int(max_items))
-    min_publish_ts = int((datetime.now(BEIJING_TZ) - timedelta(days=max(7, WERSS_REFRESH_RECENT_DAYS))).timestamp())
+    min_publish_ts = int((datetime.now(BEIJING_TZ) - timedelta(days=max(CURATED_SOURCE_MAX_AGE_DAYS, WERSS_REFRESH_RECENT_DAYS))).timestamp())
 
     clauses = [
         "a.url like 'https://mp.weixin.qq.com/%'",
@@ -6456,7 +6513,7 @@ def is_practical_candidate(item):
 def allowed_item_age_hours(item):
     source = item.get("source", "")
     if source in {"AI Frontier", "Practical Guides", "Agent/Coding AI", "Audio Creator AI", "AI Audio Discovery", "Audio/Music/Game AI", "Video Tutorials", WECHAT_SOURCE_NAME}:
-        return 24 * 7
+        return 24 * CURATED_SOURCE_MAX_AGE_DAYS
     if item.get("is_video"):
         platform = str(item.get("platform", "")).lower()
         if platform == "youtube":
@@ -8403,6 +8460,7 @@ def main():
     yt = fetch_youtube()
     bz = fetch_bilibili()
     wx_articles = fetch_wechat_articles()
+    learned_sample_items = fetch_positive_sample_items()
     video_extra = fetch_video_tutorial_sources()
     amg = fetch_audio_music_game_tutorials()
     practical_guides = fetch_practical_guides()
@@ -8436,7 +8494,7 @@ def main():
     all_items = (
         tldr + hn + wired +
         tc + tv + ars + vb + mit + ieee +
-        yt + bz + wx_articles + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + audio_discovery_guides + ai_frontier +
+        yt + bz + wx_articles + learned_sample_items + video_extra + amg + practical_guides + agent_guides + audio_creator_guides + audio_discovery_guides + ai_frontier +
         jqzx + qb + kr + ith + xzy + iq +
         sina + tt + pp +
         supp_intl + supp_domestic
