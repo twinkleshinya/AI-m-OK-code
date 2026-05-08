@@ -8506,13 +8506,20 @@ def main():
     quality_passed_items = quality_filter([dict(it) for it in all_items])
     fresh_quality_items = []
     handled_filtered_count = 0
+    learned_sample_kept_count = 0
     for item in quality_passed_items:
+        if item.get("is_positive_sample"):
+            fresh_quality_items.append(item)
+            learned_sample_kept_count += 1
+            continue
         if item_hits_history(item, history_keys) or should_filter_by_feedback_profile(item, feedback_profile):
             handled_filtered_count += 1
             continue
         fresh_quality_items.append(item)
     if handled_filtered_count:
         print(f"      [v4.2] 已推送/审核未选历史过滤: {handled_filtered_count} 条")
+    if learned_sample_kept_count:
+        print(f"      [v4.3] 正样本学习库保留进审核池: {learned_sample_kept_count} 条")
 
     final = deduplicate_and_rank(all_items, history_keys=history_keys, feedback_profile=feedback_profile)
     review_seed_items = deduplicate_and_rank(all_items, review_mode=True, history_keys=history_keys, feedback_profile=feedback_profile)
