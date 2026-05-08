@@ -462,6 +462,7 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
     if x.strip()
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_REFRESH_ALL_SUBSCRIPTIONS = os.environ.get("WERSS_REFRESH_ALL_SUBSCRIPTIONS", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
@@ -3239,7 +3240,7 @@ def _werss_response_data(resp):
     return resp
 
 
-def _fetch_werss_subscription_rows(base, token, page_size=100, max_rows=500):
+def _fetch_werss_subscription_rows(base, token, page_size=100, max_rows=2000):
     rows = []
     seen_ids = set()
     offset = 0
@@ -3551,25 +3552,32 @@ def _refresh_werss_subscriptions(base, token):
     rows = _fetch_werss_subscription_rows(base, token)
     recent_rows = [row for row in rows if _werss_row_recently_active(row)]
     sorted_recent_rows = _priority_werss_rows(recent_rows)
+    refresh_all_subscriptions = bool(WERSS_REFRESH_ALL_SUBSCRIPTIONS)
     stale_bootstrap = False
-    if sorted_recent_rows:
+    if refresh_all_subscriptions:
+        target_rows = _priority_werss_rows(rows)
+    elif sorted_recent_rows:
         stale_bootstrap = False
+        if WERSS_UPDATE_ALL_RECENT:
+            target_rows = sorted_recent_rows
+        else:
+            target_rows = sorted_recent_rows[:max(0, WERSS_UPDATE_LIMIT)]
     elif rows:
         # 微信授权失效一段时间后，库里 max_publish_time 会整体停在 7 天外。
-        # 此时“只刷新 7 天内活跃号”会把所有号都跳过，所以做一次重点号兜底刷新。
+        # 此时“只刷新 7 天内活跃号”会把所有号都跳过，所以做一次兜底刷新。
         stale_bootstrap = True
         sorted_recent_rows = _priority_werss_rows(rows)
-
-    if WERSS_UPDATE_ALL_RECENT and not stale_bootstrap:
-        target_rows = sorted_recent_rows
+        limit = WERSS_STALE_BOOTSTRAP_LIMIT
+        target_rows = sorted_recent_rows if limit <= 0 else sorted_recent_rows[:max(0, limit)]
     else:
-        limit = WERSS_STALE_BOOTSTRAP_LIMIT if stale_bootstrap else WERSS_UPDATE_LIMIT
-        target_rows = sorted_recent_rows[:max(0, limit)]
+        target_rows = []
     stats = {
         "updated": 0,
         "failed": 0,
         "skipped": max(0, len(rows) - len(target_rows)),
         "eligible": len(recent_rows),
+        "total": len(rows),
+        "refresh_all_subscriptions": refresh_all_subscriptions,
         "all_recent": bool(WERSS_UPDATE_ALL_RECENT),
         "stale_bootstrap": stale_bootstrap,
         "target_feed_ids": [_werss_row_feed_id(row) for row in target_rows if _werss_row_feed_id(row)],
@@ -3621,12 +3629,16 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
                 )
             update_stats = _refresh_werss_subscriptions(base, token)
             if update_stats.get("eligible") or update_stats["updated"] or update_stats["failed"]:
-                if update_stats.get("stale_bootstrap"):
-                    refresh_mode = f"授权恢复兜底刷新{WERSS_STALE_BOOTSTRAP_LIMIT}个"
+                if update_stats.get("refresh_all_subscriptions"):
+                    refresh_mode = f"全订阅刷新{update_stats.get('total', 0)}个"
+                elif update_stats.get("stale_bootstrap"):
+                    limit_text = "全部" if WERSS_STALE_BOOTSTRAP_LIMIT <= 0 else str(WERSS_STALE_BOOTSTRAP_LIMIT)
+                    refresh_mode = f"授权恢复兜底刷新{limit_text}个"
                 else:
                     refresh_mode = "全量刷新" if update_stats.get("all_recent") else f"限量刷新{WERSS_UPDATE_LIMIT}个"
                 print(
-                    f"      [B.5] WeRSS 订阅刷新: 近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
+                    f"      [B.5] WeRSS 订阅刷新: 总订阅 {update_stats.get('total', 0)} 个, "
+                    f"近{WERSS_REFRESH_RECENT_DAYS}天活跃 {update_stats.get('eligible', 0)} 个, "
                     f"{refresh_mode}, 更新 {update_stats['updated']} 个, 失败 {update_stats['failed']} 个, 跳过 {update_stats['skipped']} 个"
                 )
             target_feed_ids = update_stats.get("target_feed_ids") or []
