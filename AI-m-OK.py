@@ -2880,10 +2880,10 @@ def is_visible_ai_audio_candidate(item):
         return True
     text = build_item_visible_text(item)
     return bool(re.search(
-        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase)"
-        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase).{0,12}AI"
-        r"|音乐生成|音频生成|语音模型|语音识别|语音合成|文本转语音|转写"
-        r"|AI音乐|AI编曲|AI混音|AI音效|AI旋律|AI和声|AI和弦"
+        r"AI.{0,12}(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|采样|乐理|音乐制作|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase)"
+        r"|(音频|音乐|写歌|配音|配乐|音效|声音|播客|语音|旋律|和声|和弦|音符|编曲|混音|采样|乐理|音乐制作|效果器|daw|vst|midi|reaper|wwise|criware|logic|cubase).{0,12}AI"
+        r"|音乐生成|音频生成|采样生成|语音模型|语音识别|语音合成|文本转语音|转写"
+        r"|AI音乐|AI编曲|AI混音|AI音效|AI旋律|AI和声|AI和弦|AI采样|AI音乐制作"
         r"|全双工语音|语音交互|统一生成语音|统一生成语音、音乐与音效|UniSonate|PersonaPlex"
         r"|\bTTS\b|\bASR\b|Vibe[Vv]oice|Audio-Omni|Audio-Cogito|Audio-DeepThinker"
         r"|ACE Studio|\bSuno\b|\bUdio\b|ElevenLabs|Step Audio|听觉大模型",
@@ -2904,7 +2904,9 @@ def is_high_value_audio_example(item):
         r"|AI音乐.{0,30}(社区|写歌|创作|工具|应用|体验|实测|可用|案例)"
         r"|AI写歌.{0,30}(社区|创作|工具|应用|体验|实测|可用|案例|旋律|和声|和弦|编曲)"
         r"|AI.{0,12}(配乐|配音|音效|声音|音乐).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
-        r"|AI.{0,12}(旋律|和声|和弦|音符|编曲|混音|效果器|reaper|wwise|criware|logic|cubase).{0,30}(创作|工具|应用|体验|实测|可用|案例)"
+        r"|AI.{0,12}(旋律|和声|和弦|音符|编曲|混音|采样|乐理|音乐制作|效果器|reaper|wwise|criware|logic|cubase).{0,30}(创作|工具|应用|体验|实测|可用|案例|模型)"
+        r"|音乐制作.{0,20}(AI|大模型|采样|乐理|生成).{0,30}(创作|工具|应用|体验|实测|可用|案例|模型)"
+        r"|采样生成.{0,20}(AI|大模型|开源|模型|工具)"
         r"|配音.{0,20}(工作流|创作|应用|案例|工具|教程|实战)"
         r"|播客.{0,20}(工作流|创作|应用|案例|工具|教程|实战)",
         text,
@@ -2989,7 +2991,7 @@ def _start_werss_service(base):
         print(f"  [WARN] WeRSS 自动启动失败: {e}")
         return False
 
-    deadline = time.time() + 15
+    deadline = time.time() + 45
     while time.time() < deadline:
         if _werss_service_responding(base, timeout=2):
             return True
