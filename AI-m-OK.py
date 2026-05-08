@@ -8095,6 +8095,35 @@ def parse_wechat_sample_page(url):
     return item
 
 
+def _sample_override_label_from_line(line):
+    text = str(line or "").strip().lower()
+    if re.search(r"ai音频|ai 音频|音频部|音频专区|#audio|\baudio\b", text, re.IGNORECASE):
+        return "AI音频"
+    if re.search(r"实践应用|应用实践|实用|工作流|#practice|\bpractice\b", text, re.IGNORECASE):
+        return "实践应用"
+    if re.search(r"正样本|优质|#positive|\bpositive\b", text, re.IGNORECASE):
+        return "正样本"
+    return ""
+
+
+def _apply_sample_override(row, label):
+    label = str(label or "").strip()
+    if not row or not label:
+        return row
+    row["manual_category"] = label
+    if label == "AI音频":
+        row["is_audio"] = True
+        row["category"] = "AI音频"
+    elif label == "实践应用":
+        row["is_practical"] = True
+        if not row.get("is_audio"):
+            row["category"] = "实践应用"
+    elif label == "正样本":
+        if not row.get("is_audio") and not row.get("is_practical"):
+            row["category"] = "正样本"
+    return row
+
+
 def _load_positive_sample_library():
     if not POSITIVE_SAMPLE_LIBRARY_FILE.exists():
         return []
@@ -8157,12 +8186,17 @@ def learn_positive_samples_only():
 
     raw_lines = POSITIVE_SAMPLE_INBOX_FILE.read_text(encoding="utf-8").splitlines()
     urls = []
+    url_overrides = {}
     passthrough = []
     for line in raw_lines:
         stripped = line.strip()
         found = re.findall(r"https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_\-]+", stripped)
         if found:
-            urls.extend(found)
+            override_label = _sample_override_label_from_line(stripped)
+            for url in found:
+                urls.append(url)
+                if override_label:
+                    url_overrides[url] = override_label
         elif stripped and not stripped.startswith("#"):
             passthrough.append(line)
 
@@ -8190,10 +8224,14 @@ def learn_positive_samples_only():
             print("    [WARN] 未能解析标题，保留在待学习文件中。")
             failed.append(url)
             continue
+        override_label = url_overrides.get(url, "")
+        if override_label:
+            row = _apply_sample_override(row, override_label)
         key = row.get("canonical_url") or canonicalize_url_for_history(row.get("url", "")) or row.get("url_token")
         by_key[key] = row
         learned.append(row)
-        print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')} | {row.get('title')}")
+        manual_note = f" | 手动标注:{override_label}" if override_label else ""
+        print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')}{manual_note} | {row.get('title')}")
 
     _save_positive_sample_library(list(by_key.values()))
     sub_stats = _subscribe_learned_accounts([row.get("account_name", "") for row in learned])
