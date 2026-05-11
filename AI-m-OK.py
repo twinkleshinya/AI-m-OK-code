@@ -7617,6 +7617,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             grid-template-columns: repeat(2, 1fr);
             gap: 18px;
         }}
+        .cards-grid > .card:only-child {{
+            grid-column: 1 / -1;
+            width: 100%;
+            max-width: 520px;
+            justify-self: center;
+        }}
         @media (max-width: 640px) {{
             .cards-grid {{ grid-template-columns: 1fr; }}
             .header h1 {{ font-size: 1.8em; }}
