@@ -7504,7 +7504,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             min-height: 100vh;
             padding: 24px 16px;
         }}
-        .container {{ max-width: 960px; margin: 0 auto; }}
+        .container {{ max-width: 960px; margin: 0 auto; position: relative; }}
+        .history-entry {{
+            position: absolute;
+            top: 18px;
+            right: 0;
+            background: transparent;
+            border: 0;
+            color: rgba(255,255,255,0.52);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 4px 0;
+            letter-spacing: 0.3px;
+        }}
+        .history-entry:hover,
+        .history-entry.active {{
+            color: #73e2d4;
+            text-decoration: underline;
+            text-underline-offset: 4px;
+        }}
         .header {{
             text-align: center;
             padding: 48px 0 36px;
@@ -7577,17 +7595,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
             box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
         }}
-        .tab-btn.history.active {{
-            background: #0f766e;
-            box-shadow: 0 4px 18px rgba(15, 118, 110, 0.32);
-        }}
-        .tab-btn.history {{
-            position: absolute;
-            right: 0;
-            top: 0;
-            padding-left: 22px;
-            padding-right: 22px;
-        }}
         .tab-count {{
             display: inline-block;
             background: rgba(255,255,255,0.2);
@@ -7617,7 +7624,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             .stats {{ gap: 12px; }}
             .tabs {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }}
             .main-tabs {{ flex-wrap: wrap; gap: 10px; }}
-            .tab-btn.history {{ position: static; }}
+            .history-entry {{ top: 8px; right: 2px; font-size: 12px; }}
             .tab-btn {{ padding: 10px 24px; font-size: 14px; }}
         }}
         .card {{
@@ -7816,6 +7823,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
+        <button class="history-entry" onclick="switchTab('history', this)">历史浏览 · {history_count}</button>
         <div class="header">
             <div class="logo">\U0001f955</div>
             <h1>AI'm OK-{date}</h1>
@@ -7834,7 +7842,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
             <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
         </div>
-        <button class="tab-btn history" onclick="switchTab('history', this)">📚历史浏览<span class="tab-count">{history_count}</span></button>
     </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
@@ -7872,6 +7879,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 el.classList.remove('active');
             }});
             document.querySelectorAll('.tab-btn').forEach(function(el) {{
+                el.classList.remove('active');
+            }});
+            document.querySelectorAll('.history-entry').forEach(function(el) {{
                 el.classList.remove('active');
             }});
             document.getElementById('tab-' + tab).classList.add('active');
