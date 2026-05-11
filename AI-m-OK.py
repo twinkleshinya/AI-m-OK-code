@@ -7864,7 +7864,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         <div class="footer">
-            \U0001f955 由 AI'm OK v3.2 自动生成 | {date} | 国内外 {source_count} 源聚合
+            \U0001f955 由 AI'm OK v3.2 自动生成 | {date}
         </div>
     </div>
     <script>
