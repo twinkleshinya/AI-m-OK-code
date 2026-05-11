@@ -7728,10 +7728,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }}
         .history-toolbar {{
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 12px;
-            align-items: center;
             margin-bottom: 16px;
         }}
         .history-search {{
@@ -7747,11 +7743,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .history-search:focus {{
             border-color: #2dd4bf;
             box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
-        }}
-        .history-count {{
-            color: #9fb0c2;
-            font-size: 13px;
-            white-space: nowrap;
         }}
         .history-list {{
             display: flex;
@@ -7815,8 +7806,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border-radius: 10px;
         }}
         @media (max-width: 640px) {{
-            .history-toolbar {{ grid-template-columns: 1fr; }}
-            .history-count {{ white-space: normal; }}
             .history-item {{ grid-template-columns: 1fr; gap: 8px; }}
         }}
         .footer {{
@@ -7829,7 +7818,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
-        <button class="history-entry" onclick="switchTab('history', this)">历史浏览 · {history_count}</button>
+        <button class="history-entry" onclick="switchTab('history', this)">历史浏览</button>
         <div class="header">
             <div class="logo">\U0001f955</div>
             <h1>AI'm OK-{date}</h1>
@@ -7868,7 +7857,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="history-panel">
                 <div class="history-toolbar">
                     <input id="historySearch" class="history-search" type="search" placeholder="搜索历史标题、摘要、来源或分类" oninput="filterHistory()" autocomplete="off">
-                    <div class="history-count"><span id="historyVisibleCount">{history_count}</span> / {history_count} 条历史</div>
                 </div>
                 <div id="historyList" class="history-list">
 {history_cards}
