@@ -109,6 +109,7 @@ PAGES_DIR = Path(
 )
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
 HISTORY_FILE = PAGES_DIR / "push_history.json"
+PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
 STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
@@ -147,6 +148,8 @@ REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
 REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
+PUSH_ARCHIVE_MAX_ITEMS = int(os.environ.get("PUSH_ARCHIVE_MAX_ITEMS", "1500"))
+PUSH_ARCHIVE_BACKFILL_MAX_FILES = int(os.environ.get("PUSH_ARCHIVE_BACKFILL_MAX_FILES", "80"))
 WECHAT_AUDIO_SOURCE_WEIGHT = int(os.environ.get("WECHAT_AUDIO_SOURCE_WEIGHT", "96"))
 MIN_AUDIO_DISCOVERY_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_DISCOVERY_REVIEW_CHOICES", "12"))
 
@@ -1320,6 +1323,177 @@ def save_history(new_history_keys):
             json.dump(updated, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"  [WARN] Failed to save history: {e}")
+
+
+def _archive_key_from_row(row):
+    url = canonicalize_url_for_history(row.get("url", ""))
+    if url:
+        return f"url::{url}"
+    title_key = normalize_title_key(row.get("title_zh") or row.get("title") or "")
+    source = str(row.get("source") or row.get("account_name") or "").strip().lower()
+    return f"title::{source}::{title_key}" if title_key else ""
+
+
+def _archive_section_for_item(item, audio_item_urls=None):
+    url = str(item.get("url", "") or "").rstrip("/")
+    audio_urls = {str(u or "").rstrip("/") for u in (audio_item_urls or set()) if str(u or "").strip()}
+    if url in audio_urls or item.get("is_audio") or is_audio_special_item(item):
+        return "AI音频"
+    return "国内资讯" if item.get("source_type") == "domestic" else "国际资讯"
+
+
+def _archive_row_from_item(item, date_str, audio_item_urls=None):
+    src_info = get_source_info(item.get("source", ""))
+    section = _archive_section_for_item(item, audio_item_urls=audio_item_urls)
+    return {
+        "pushed_date": date_str,
+        "pushed_at": _now_iso(),
+        "section": section,
+        "url": item.get("url", ""),
+        "title": item.get("title", ""),
+        "title_zh": item.get("title_zh") or item.get("title", ""),
+        "summary": item.get("summary", ""),
+        "summary_zh": item.get("summary_zh") or item.get("summary", ""),
+        "source": item.get("source", ""),
+        "source_display": src_info.get("display") or item.get("source", ""),
+        "source_type": item.get("source_type") or src_info.get("type", ""),
+        "account_name": item.get("account_name", ""),
+        "heat_score": float(item.get("heat_score", 0) or 0),
+        "is_audio": section == "AI音频",
+    }
+
+
+def load_push_archive():
+    if not PUSH_ARCHIVE_FILE.exists():
+        return []
+    try:
+        with open(PUSH_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            rows = raw.get("items", [])
+        else:
+            rows = raw
+        return [row for row in rows if isinstance(row, dict)]
+    except Exception as e:
+        print(f"  [WARN] Failed to load push archive: {e}")
+        return []
+
+
+def save_push_archive(rows):
+    try:
+        PAGES_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "updated_at": _now_iso(),
+            "items": rows[:PUSH_ARCHIVE_MAX_ITEMS],
+        }
+        with open(PUSH_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"  [WARN] Failed to save push archive: {e}")
+
+
+def append_push_archive(items, date_str, audio_item_urls=None):
+    """仅在飞书推送成功后调用：保存网页版可浏览的历史内容。"""
+    existing = load_push_archive()
+    merged = {}
+    ordered = []
+
+    for item in items:
+        row = _archive_row_from_item(item, date_str, audio_item_urls=audio_item_urls)
+        key = _archive_key_from_row(row)
+        if not key:
+            continue
+        merged[key] = row
+        ordered.append(key)
+
+    for row in existing:
+        key = _archive_key_from_row(row)
+        if key and key not in merged:
+            merged[key] = row
+            ordered.append(key)
+
+    rows = [merged[key] for key in ordered if key in merged]
+    save_push_archive(rows)
+    return len(rows)
+
+
+def _strip_html_to_text(fragment):
+    text = re.sub(r"<script\b.*?</script>", " ", fragment or "", flags=re.I | re.S)
+    text = re.sub(r"<style\b.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_first_html_class(block, class_name):
+    pattern = rf'<[^>]*class="[^"]*\b{re.escape(class_name)}\b[^"]*"[^>]*>(.*?)</[^>]+>'
+    m = re.search(pattern, block or "", flags=re.I | re.S)
+    return _strip_html_to_text(m.group(1)) if m else ""
+
+
+def _backfill_archive_from_published_pages():
+    """从已发布的历史 HTML 中补一份浏览归档，避免首次加功能时历史为空。"""
+    if not PAGES_DIR.exists():
+        return []
+    files = sorted(
+        PAGES_DIR.glob("AI-m-OK-*.html"),
+        key=lambda p: p.name,
+        reverse=True,
+    )[:PUSH_ARCHIVE_BACKFILL_MAX_FILES]
+    rows = []
+    for path in files:
+        date_match = re.search(r"AI-m-OK-(\d{4}-\d{2}-\d{2})\.html$", path.name)
+        pushed_date = date_match.group(1) if date_match else ""
+        try:
+            html = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for m in re.finditer(
+            r'<a\s+class="card"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            html,
+            flags=re.I | re.S,
+        ):
+            url = unescape(m.group(1)).strip()
+            block = m.group(2)
+            title = _extract_first_html_class(block, "card-title")
+            summary = _extract_first_html_class(block, "card-summary")
+            source = _extract_first_html_class(block, "card-source")
+            if not url or not title:
+                continue
+            text_blob = f"{title} {summary}"
+            is_audio = bool(re.search(r"AI音频|音频|语音|音乐|配音|音效|编曲|混音|旋律|和声|和弦", text_blob, re.I))
+            rows.append({
+                "pushed_date": pushed_date,
+                "pushed_at": pushed_date,
+                "section": "AI音频" if is_audio else "",
+                "url": url,
+                "title": title,
+                "title_zh": title,
+                "summary": summary,
+                "summary_zh": summary,
+                "source": source,
+                "source_display": source,
+                "source_type": "",
+                "account_name": "",
+                "heat_score": 0,
+                "is_audio": is_audio,
+                "_backfilled": True,
+            })
+    return rows
+
+
+def load_push_archive_for_display():
+    rows = load_push_archive()
+    rows.extend(_backfill_archive_from_published_pages())
+    merged = {}
+    ordered = []
+    for row in rows:
+        key = _archive_key_from_row(row)
+        if not key or key in merged:
+            continue
+        merged[key] = row
+        ordered.append(key)
+    return [merged[key] for key in ordered][:PUSH_ARCHIVE_MAX_ITEMS]
 
 
 def _ensure_state_dir():
@@ -7399,6 +7573,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
             box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
         }}
+        .tab-btn.history.active {{
+            background: #0f766e;
+            box-shadow: 0 4px 18px rgba(15, 118, 110, 0.32);
+        }}
         .tab-count {{
             display: inline-block;
             background: rgba(255,255,255,0.2);
@@ -7516,6 +7694,105 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: #6a6a80;
             font-size: 14px;
         }}
+        .history-panel {{
+            background: #111820;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }}
+        .history-toolbar {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+        }}
+        .history-search {{
+            width: 100%;
+            background: #0b1117;
+            color: #e5edf5;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 15px;
+            outline: none;
+        }}
+        .history-search:focus {{
+            border-color: #2dd4bf;
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+        }}
+        .history-count {{
+            color: #9fb0c2;
+            font-size: 13px;
+            white-space: nowrap;
+        }}
+        .history-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+        .history-item {{
+            display: grid;
+            grid-template-columns: 108px minmax(0, 1fr);
+            gap: 14px;
+            padding: 14px;
+            border-radius: 10px;
+            background: #0c1218;
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            color: inherit;
+            text-decoration: none;
+        }}
+        .history-item:hover {{
+            border-color: rgba(45, 212, 191, 0.45);
+            background: #0f1720;
+        }}
+        .history-date {{
+            color: #2dd4bf;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            padding-top: 2px;
+        }}
+        .history-title {{
+            color: #edf5f7;
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.45;
+            margin-bottom: 6px;
+        }}
+        .history-summary {{
+            color: #9aa9b8;
+            font-size: 13px;
+            line-height: 1.65;
+            margin-bottom: 8px;
+        }}
+        .history-meta {{
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            color: #7d8ea1;
+            font-size: 12px;
+        }}
+        .history-chip {{
+            background: rgba(45, 212, 191, 0.1);
+            color: #73e2d4;
+            border: 1px solid rgba(45, 212, 191, 0.18);
+            border-radius: 999px;
+            padding: 2px 8px;
+        }}
+        .history-empty {{
+            color: #9aa9b8;
+            text-align: center;
+            padding: 28px 12px;
+            border: 1px dashed rgba(148, 163, 184, 0.22);
+            border-radius: 10px;
+        }}
+        @media (max-width: 640px) {{
+            .history-toolbar {{ grid-template-columns: 1fr; }}
+            .history-count {{ white-space: normal; }}
+            .history-item {{ grid-template-columns: 1fr; gap: 8px; }}
+        }}
         .footer {{
             text-align: center;
             color: rgba(255,255,255,0.35);
@@ -7542,6 +7819,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
         <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
         <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
+        <button class="tab-btn history" onclick="switchTab('history', this)">📚历史浏览<span class="tab-count">{history_count}</span></button>
     </div>
         <div id="tab-intl" class="tab-content active">
             <div class="cards-grid">
@@ -7558,6 +7836,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 {audio_cards}
         </div>
         </div>
+        <div id="tab-history" class="tab-content">
+            <div class="history-panel">
+                <div class="history-toolbar">
+                    <input id="historySearch" class="history-search" type="search" placeholder="搜索历史标题、摘要、来源或分类" oninput="filterHistory()" autocomplete="off">
+                    <div class="history-count"><span id="historyVisibleCount">{history_count}</span> / {history_count} 条历史</div>
+                </div>
+                <div id="historyList" class="history-list">
+{history_cards}
+                </div>
+            </div>
+        </div>
         <div class="footer">
             \U0001f955 由 AI'm OK v3.2 自动生成 | {date} | 国内外 {source_count} 源聚合
         </div>
@@ -7573,6 +7862,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('tab-' + tab).classList.add('active');
             btn.classList.add('active');
         }}
+        function filterHistory() {{
+            var input = document.getElementById('historySearch');
+            var query = (input && input.value ? input.value : '').trim().toLowerCase();
+            var visible = 0;
+            document.querySelectorAll('.history-item').forEach(function(el) {{
+                var text = (el.getAttribute('data-history-text') || '').toLowerCase();
+                var show = !query || text.indexOf(query) !== -1;
+                el.style.display = show ? 'grid' : 'none';
+                if (show) visible += 1;
+            }});
+            var counter = document.getElementById('historyVisibleCount');
+            if (counter) counter.textContent = String(visible);
+        }}
     </script>
 </body>
 </html>"""
@@ -7587,6 +7889,18 @@ CARD_TEMPLATE = """            <a class="card" href="{url}" target="_blank" rel=
                     <span class="card-arrow">\u2192</span>
                 </div>
             </a>"""
+
+HISTORY_ITEM_TEMPLATE = """                    <a class="history-item" href="{url}" target="_blank" rel="noopener" data-history-text="{search_text}">
+                        <div class="history-date">{pushed_date}</div>
+                        <div>
+                            <div class="history-title">{title}</div>
+                            <div class="history-summary">{summary}</div>
+                            <div class="history-meta">
+                                <span>{source_display}</span>
+                                <span class="history-chip">{section}</span>
+                            </div>
+                        </div>
+                    </a>"""
 
 def _build_card_html(item):
     tags = infer_tags(item)
@@ -7607,6 +7921,33 @@ def _build_card_html(item):
         badge_class=badge_class,
         source_icon=source_icon,
     )
+
+def _build_history_html(rows):
+    if not rows:
+        return '                    <div class="history-empty">暂无已推送历史。完成一次审核并成功推送飞书后，这里会自动汇总。</div>'
+
+    html_rows = []
+    for row in rows:
+        title = row.get("title_zh") or row.get("title") or "未命名资讯"
+        summary = row.get("summary_zh") or row.get("summary") or ""
+        if len(summary) > 180:
+            summary = summary[:177].rstrip() + "..."
+        source_display = row.get("source_display") or row.get("source") or row.get("account_name") or "未知来源"
+        section = row.get("section") or ("AI音频" if row.get("is_audio") else "历史")
+        pushed_date = row.get("pushed_date") or str(row.get("pushed_at") or "")[:10] or "未知日期"
+        search_text = " ".join(
+            str(x or "") for x in [title, summary, source_display, section, pushed_date]
+        )
+        html_rows.append(HISTORY_ITEM_TEMPLATE.format(
+            url=escape(row.get("url", ""), quote=True),
+            pushed_date=escape(pushed_date),
+            title=escape(title),
+            summary=escape(summary),
+            source_display=escape(source_display),
+            section=escape(section),
+            search_text=escape(search_text, quote=True),
+        ))
+    return "\n".join(html_rows)
 
 def generate_html(items, date_str, audio_item_urls=None):
     canonical_audio_urls = {
@@ -7648,6 +7989,8 @@ def generate_html(items, date_str, audio_item_urls=None):
     intl_cards = "\n".join(_build_card_html(item) for item in intl_items)
     domestic_cards = "\n".join(_build_card_html(item) for item in domestic_items)
     audio_cards = "\n".join(_build_card_html(item) for item in audio_special_items)
+    history_rows = load_push_archive_for_display()
+    history_cards = _build_history_html(history_rows)
 
     return HTML_TEMPLATE.format(
         date=date_str,
@@ -7658,6 +8001,8 @@ def generate_html(items, date_str, audio_item_urls=None):
         intl_count=intl_count,
         domestic_count=domestic_count,
         audio_count=audio_count,
+        history_cards=history_cards,
+        history_count=len(history_rows),
         source_count=source_count,
     )
 
@@ -8705,10 +9050,6 @@ def main():
     output_path.write_text(html, encoding="utf-8")
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
-    print("\n🚀 [Phase H] Publishing...")
-    publish_to_pages(html, today)
-    backup_script_to_github(today)
-
     card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
     feishu_ok = push_feishu(card)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
@@ -8726,13 +9067,21 @@ def main():
                 unselected_history_keys.update(history_keys_from_feedback_record(row))
         save_history(pushed_history_keys | unselected_history_keys)
         append_review_feedback(review_feedback_records)
+        archive_total = append_push_archive(final, today, audio_item_urls=selected_audio_urls)
+        html = generate_html(final, today, audio_item_urls=selected_audio_urls)
+        output_path.write_text(html, encoding="utf-8")
         print(
             f"      已保存飞书推送历史: URL {len(pushed_urls)} 条, "
             f"已推送去重键 {len(pushed_history_keys)} 条, "
-            f"审核未选排除键 {len(unselected_history_keys)} 条，后续将避免重复筛出。"
+            f"审核未选排除键 {len(unselected_history_keys)} 条，"
+            f"历史浏览归档 {archive_total} 条，后续将避免重复筛出。"
         )
     else:
         print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
+
+    print("\n🚀 [Phase H] Publishing...")
+    publish_to_pages(html, today)
+    backup_script_to_github(today)
 
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
     dom_final = sum(1 for it in final if it.get("source_type") == "domestic")
