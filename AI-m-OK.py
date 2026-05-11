@@ -7818,7 +7818,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
-        <button class="history-entry" onclick="switchTab('history', this)">🖱 历史浏览</button>
+        <button class="history-entry" onclick="switchTab('history', this)">🖱️ 历史浏览</button>
         <div class="header">
             <div class="logo">\U0001f955</div>
             <h1>AI'm OK-{date}</h1>
