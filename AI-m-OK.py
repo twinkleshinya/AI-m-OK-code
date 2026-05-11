@@ -7540,10 +7540,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: rgba(255,255,255,0.7);
         }}
         .tabs {{
+            position: relative;
+            margin-bottom: 28px;
+            min-height: 50px;
+        }}
+        .main-tabs {{
             display: flex;
             justify-content: center;
             gap: 16px;
-            margin-bottom: 28px;
         }}
         .tab-btn {{
             background: rgba(255,255,255,0.08);
@@ -7577,6 +7581,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: #0f766e;
             box-shadow: 0 4px 18px rgba(15, 118, 110, 0.32);
         }}
+        .tab-btn.history {{
+            position: absolute;
+            right: 0;
+            top: 0;
+            padding-left: 22px;
+            padding-right: 22px;
+        }}
         .tab-count {{
             display: inline-block;
             background: rgba(255,255,255,0.2);
@@ -7604,7 +7615,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             .header h1 {{ font-size: 1.8em; }}
             .header .logo {{ font-size: 42px; }}
             .stats {{ gap: 12px; }}
-            .tabs {{ gap: 10px; }}
+            .tabs {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }}
+            .main-tabs {{ flex-wrap: wrap; gap: 10px; }}
+            .tab-btn.history {{ position: static; }}
             .tab-btn {{ padding: 10px 24px; font-size: 14px; }}
         }}
         .card {{
@@ -7816,9 +7829,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
-        <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
-        <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
+        <div class="main-tabs">
+            <button class="tab-btn active" onclick="switchTab('intl', this)">🌐国际资讯<span class="tab-count">{intl_count}</span></button>
+            <button class="tab-btn" onclick="switchTab('domestic', this)">🏮国内资讯<span class="tab-count">{domestic_count}</span></button>
+            <button class="tab-btn special" onclick="switchTab('audio', this)">🎧AI音频<span class="tab-count">{audio_count}</span></button>
+        </div>
         <button class="tab-btn history" onclick="switchTab('history', this)">📚历史浏览<span class="tab-count">{history_count}</span></button>
     </div>
         <div id="tab-intl" class="tab-content active">
