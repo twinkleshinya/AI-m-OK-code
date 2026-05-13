@@ -75,19 +75,11 @@ def _unique_webhooks(webhooks):
     return result
 
 
-DEFAULT_FEISHU_WEBHOOKS = [
+FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
-]
-EXTRA_FEISHU_WEBHOOKS = [
-    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
-]
-FEISHU_WEBHOOKS = _unique_webhooks(
-    _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", ",".join(DEFAULT_FEISHU_WEBHOOKS)))
-    + EXTRA_FEISHU_WEBHOOKS
-)
-REVIEW_NOTIFY_TARGET_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/01c129a5-baa4-400d-a980-9138d5d7168d"
+    "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
+])
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
-    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
     *FEISHU_WEBHOOKS,
 }
 REVIEW_NOTIFY_WEBHOOKS = []
@@ -146,6 +138,7 @@ MIN_AUDIO_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_REVIEW_CHOICES", "10"))
 REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
 REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
 REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
+POSITIVE_SAMPLE_REVIEW_DAYS = int(os.environ.get("POSITIVE_SAMPLE_REVIEW_DAYS", "3"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 PUSH_ARCHIVE_MAX_ITEMS = int(os.environ.get("PUSH_ARCHIVE_MAX_ITEMS", "1500"))
@@ -1256,6 +1249,19 @@ def item_hits_history(item, history_keys):
         bool(fp and f"fp::{fp}" in history_keys),
         bool(event_fp and f"event::{event_fp}" in history_keys),
         bool(product_key and product_key in history_keys),
+    ))
+
+
+def item_hits_exact_history(item, history_keys):
+    """只检查明确已处理项，避免 event/product 这类宽泛键误杀正样本。"""
+    history_keys = history_keys or set()
+    canonical_url = canonicalize_url_for_history(item.get("url", ""))
+    title_key = normalize_title_key(item.get("title_zh") or item.get("title") or "")
+    fp = extract_content_fingerprint(item)
+    return any((
+        bool(canonical_url and f"url::{canonical_url}" in history_keys),
+        bool(title_key and f"title::{title_key}" in history_keys),
+        bool(fp and f"fp::{fp}" in history_keys),
     ))
 
 
@@ -6732,7 +6738,9 @@ def quality_filter(items):
         if item.get("source") == "Hacker News" and re.search(r"^\s*(ask|show|tell|launch)\s+hn\b", title, re.IGNORECASE):
             continue
 
-        if not github_with_usage_instruction({"title": title, "summary": summary, "url": url}):
+        is_positive_sample = bool(item.get("is_positive_sample"))
+
+        if not is_positive_sample and not github_with_usage_instruction({"title": title, "summary": summary, "url": url}):
             continue
         if is_non_actionable_page(item):
             continue
@@ -6925,7 +6933,7 @@ def deduplicate_and_rank(all_items, review_mode=False, history_keys=None, feedba
         item["heat_score"] = calculate_heat_score(item)
         item["audio_score"] = item.get("audio_score", audio_relevance_score(item))
         item["feedback_bias"] = feedback_bias_score(item, feedback_profile)
-        if should_filter_by_feedback_profile(item, feedback_profile):
+        if not item.get("is_positive_sample") and should_filter_by_feedback_profile(item, feedback_profile):
             feedback_filtered_count += 1
             continue
         item["heat_score"] += item["audio_score"] * 8 + item["feedback_bias"] * 6
@@ -6978,7 +6986,11 @@ def deduplicate_and_rank(all_items, review_mode=False, history_keys=None, feedba
 
         if not title:
             continue
-        history_hit = item_hits_history(item, history_keys)
+        history_hit = (
+            item_hits_exact_history(item, history_keys)
+            if item.get("is_positive_sample")
+            else item_hits_history(item, history_keys)
+        )
         if canonical_url in seen_urls or history_hit:
             continue
 
@@ -7176,6 +7188,19 @@ def select_source_balanced_items(items, limit, default_max, wechat_max, preserve
         if len(selected) >= limit:
             break
     return selected
+
+
+def is_recent_positive_sample(item, days=None):
+    if not item or not item.get("is_positive_sample"):
+        return False
+    days = POSITIVE_SAMPLE_REVIEW_DAYS if days is None else days
+    if days <= 0:
+        return True
+    dt = parse_date_to_beijing(item.get("date") or item.get("learned_at") or "")
+    if not dt:
+        return False
+    age = datetime.now(BEIJING_TZ) - dt
+    return timedelta(0) <= age <= timedelta(days=days)
 
 
 def enforce_diversity_with_pool(items):
@@ -7494,6 +7519,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>AI'm OK-{date}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -7592,8 +7620,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             box-shadow: 0 4px 18px rgba(102, 126, 234, 0.4);
         }}
         .tab-btn.special.active {{
-            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-            box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
+            background: linear-gradient(135deg, #9a3412 0%, #dc2626 52%, #f97316 100%);
+            box-shadow: 0 4px 18px rgba(220, 38, 38, 0.34);
         }}
         .tab-count {{
             display: inline-block;
@@ -8252,6 +8280,7 @@ def build_review_feedback_records(all_review_items, selected_items):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=None):
+    web_page_url = f"{PAGES_URL}/AI-m-OK-{date_str}.html?v={date_str.replace('-', '')}"
     ranked_feishu_items = sorted(
         items,
         key=lambda x: (
@@ -8400,7 +8429,7 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
             "tag": "button",
             "text": {"tag": "plain_text", "content": "查看完整网页版"},
             "type": "default",
-            "url": f"{PAGES_URL}/latest.html",
+            "url": web_page_url,
         }],
     })
 
@@ -8873,6 +8902,9 @@ def main():
     learned_sample_kept_count = 0
     for item in quality_passed_items:
         if item.get("is_positive_sample"):
+            if item_hits_exact_history(item, history_keys):
+                handled_filtered_count += 1
+                continue
             fresh_quality_items.append(item)
             learned_sample_kept_count += 1
             continue
@@ -8967,6 +8999,30 @@ def main():
         default_max=REVIEW_MAX_PER_SOURCE,
         wechat_max=REVIEW_WECHAT_MAX,
     )
+    review_urls = {
+        str(it.get("url", "")).rstrip("/")
+        for it in review_candidates
+        if it.get("url")
+    }
+    recent_positive_added = 0
+    recent_positive_items = sorted(
+        [
+            dict(it)
+            for it in fresh_quality_items
+            if is_recent_positive_sample(it)
+        ],
+        key=lambda x: parse_date_to_beijing(x.get("date") or "") or datetime.min.replace(tzinfo=BEIJING_TZ),
+        reverse=True,
+    )
+    for item in recent_positive_items:
+        url = str(item.get("url", "")).rstrip("/")
+        if not url or url in review_urls:
+            continue
+        review_candidates.append(item)
+        review_urls.add(url)
+        recent_positive_added += 1
+    if recent_positive_added:
+        print(f"      [v4.4] 最近学习正样本强制补入审核页: {recent_positive_added} 条")
     if sum(1 for it in review_candidates if is_audio_special_item(it)) < target_audio_choices:
         review_urls = {
             str(it.get("url", "")).rstrip("/")
