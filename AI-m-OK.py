@@ -143,6 +143,8 @@ FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 PUSH_ARCHIVE_MAX_ITEMS = int(os.environ.get("PUSH_ARCHIVE_MAX_ITEMS", "1500"))
 PUSH_ARCHIVE_BACKFILL_MAX_FILES = int(os.environ.get("PUSH_ARCHIVE_BACKFILL_MAX_FILES", "80"))
+HANDLED_TITLE_LOOKBACK = int(os.environ.get("HANDLED_TITLE_LOOKBACK", "500"))
+HANDLED_TITLE_SIMILARITY_THRESHOLD = float(os.environ.get("HANDLED_TITLE_SIMILARITY_THRESHOLD", "0.72"))
 WECHAT_AUDIO_SOURCE_WEIGHT = int(os.environ.get("WECHAT_AUDIO_SOURCE_WEIGHT", "96"))
 MIN_AUDIO_DISCOVERY_REVIEW_CHOICES = int(os.environ.get("MIN_AUDIO_DISCOVERY_REVIEW_CHOICES", "12"))
 
@@ -1771,6 +1773,8 @@ def should_filter_by_feedback_profile(item, profile=None):
     if product_key and product_key in profile.get("rejected_product_keys", set()):
         return True
     if event_fp and event_fp in profile.get("rejected_event_fingerprints", set()):
+        return True
+    if not item.get("is_positive_sample") and is_similar_to_handled_story(item):
         return True
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
@@ -6236,6 +6240,45 @@ def is_duplicate_title(new_title, existing_titles, threshold=0.65):
         if title_similarity(new_title, existing) > threshold:
             return True
     return False
+
+
+_HANDLED_STORY_TITLES_CACHE = None
+
+
+def load_handled_story_titles(limit=None):
+    global _HANDLED_STORY_TITLES_CACHE
+    if _HANDLED_STORY_TITLES_CACHE is not None:
+        return _HANDLED_STORY_TITLES_CACHE
+    limit = HANDLED_TITLE_LOOKBACK if limit is None else limit
+    titles = []
+
+    def add_title(value):
+        title = str(value or "").strip()
+        if len(normalize_title_key(title)) >= 8 and title not in titles:
+            titles.append(title)
+
+    for row in load_push_archive()[:max(0, limit)]:
+        add_title(row.get("title_zh") or row.get("title"))
+        if len(titles) >= limit:
+            break
+
+    if len(titles) < limit:
+        for row in reversed(load_review_feedback_rows(limit=limit)):
+            if row.get("selected") is False:
+                add_title(row.get("title_zh") or row.get("title"))
+                if len(titles) >= limit:
+                    break
+
+    _HANDLED_STORY_TITLES_CACHE = titles
+    return titles
+
+
+def is_similar_to_handled_story(item, threshold=None):
+    title = item.get("title_zh") or item.get("title") or ""
+    if len(normalize_title_key(title)) < 8:
+        return False
+    threshold = HANDLED_TITLE_SIMILARITY_THRESHOLD if threshold is None else threshold
+    return any(title_similarity(title, handled) >= threshold for handled in load_handled_story_titles())
 
 
 def extract_content_fingerprint(item):
