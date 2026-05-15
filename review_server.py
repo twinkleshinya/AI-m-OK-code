@@ -13,7 +13,7 @@ import threading
 import time
 import webbrowser
 from html import escape
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 FEEDBACK_OPTIONS = [
@@ -580,46 +580,53 @@ def start_review_server(
     )
 
     class ReviewHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, fmt, *args):
             pass
 
+        def _send_headers(self, status, content_type=None, content_length=None):
+            self.send_response(status)
+            if content_type:
+                self.send_header("Content-Type", content_type)
+            if content_length is not None:
+                self.send_header("Content-Length", str(content_length))
+            self.send_header("Connection", "close")
+            self.end_headers()
+
         def do_GET(self):
             if self.path in {"/", "/review"}:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(page_html.encode("utf-8"))
+                body = page_html.encode("utf-8")
+                self._send_headers(200, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
                 return
             if self.path == "/shutdown":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"ok": true}')
+                body = b'{"ok": true}'
+                self._send_headers(200, "application/json", len(body))
+                self.wfile.write(body)
                 threading.Thread(target=self._shutdown_server, daemon=True).start()
                 return
             if self.path == "/cancel":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"ok": true}')
+                body = b'{"ok": true}'
+                self._send_headers(200, "application/json", len(body))
+                self.wfile.write(body)
                 review_result.selected_ids = []
                 review_result.ordered_ids = []
                 review_result.feedback = []
                 review_result.completed.set()
                 threading.Thread(target=self._shutdown_server, daemon=True).start()
                 return
-            self.send_response(404)
-            self.end_headers()
+            self._send_headers(404, content_length=0)
 
         def do_POST(self):
             if self.path != "/submit":
-                self.send_response(404)
-                self.end_headers()
+                self._send_headers(404, content_length=0)
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8")
             try:
+                self.connection.settimeout(15)
+                body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body or "{}")
                 review_result.selected_ids = data.get("selected_ids", [])
                 review_result.ordered_ids = data.get("ordered_ids", [])
@@ -630,21 +637,20 @@ def start_review_server(
                     "count": len(review_result.selected_ids),
                     "feedback_count": sum(1 for row in review_result.feedback if row.get("labels")),
                 }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps(response, ensure_ascii=False).encode("utf-8"))
+                body_bytes = json.dumps(response, ensure_ascii=False).encode("utf-8")
+                self._send_headers(200, "application/json; charset=utf-8", len(body_bytes))
+                self.wfile.write(body_bytes)
             except Exception as exc:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                body_bytes = json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
+                self._send_headers(500, "application/json; charset=utf-8", len(body_bytes))
+                self.wfile.write(body_bytes)
 
         def _shutdown_server(self):
             time.sleep(1)
             self.server.shutdown()
 
-    server = HTTPServer(("127.0.0.1", port), ReviewHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), ReviewHandler)
+    server.daemon_threads = True
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
