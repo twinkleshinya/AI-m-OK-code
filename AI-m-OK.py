@@ -521,6 +521,7 @@ AI_KEYWORDS = re.compile(
     r"|ai.agent|ai.model|foundation.model|reasoning.model"
     r"|ai.chip|ai.video|ai.startup|ai.fund|ai.regul|ai.safety"
     r"|sora|dall.?e|copilot.ai|cursor.ai|ai.coding"
+    r"|ai.copyright|copyrighted|content.id|rights.management|royalty|licensed.music"
     r"|deepseek|qwen|glm|baichuan|moonshot|kimi|doubao|zhipu"
     r"|大模型|人工智能|机器学习|深度学习|智能体|具身智能",
     re.IGNORECASE,
@@ -530,7 +531,8 @@ AI_KEYWORDS_ZH = re.compile(
     r"AI|人工智能|大模型|机器学习|深度学习|神经网络|自然语言处理"
     r"|生成式|智能体|大语言模型|多模态|GPT|LLM|AIGC"
     r"|DeepSeek|通义|文心|豆包|星火|智谱|月之暗面|Kimi"
-    r"|具身智能|机器人|自动驾驶|AI芯片|算力",
+    r"|具身智能|机器人|自动驾驶|AI芯片|算力"
+    r"|AI版权|AI著作权|AI版權|生成式AI.*版权|生成式AI.*版權|版权.*AI|版權.*AI|著作权.*AI|著作權.*AI",
     re.IGNORECASE,
 )
 
@@ -744,6 +746,7 @@ PRACTICAL_SIGNAL = re.compile(
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
     r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
     r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase"
+    r"|AI版权|AI著作权|AI版權|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|内容识别|內容識別|Content ID|licensed music"
     r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios",
     re.IGNORECASE,
 )
@@ -781,6 +784,7 @@ MODEL_SIGNAL = re.compile(
 APPLICATION_SIGNAL = re.compile(
     r"应用|场景|落地|部署|workflow|自动化|效率|生产力|集成|api|sdk|tool|agent|RAG|实战|教程|案例"
     r"|音频制作|播客制作|配音工作流|语音克隆|字幕转写|音频后期|音乐生成"
+    r"|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|内容识别|內容識別|Content ID|rights management|licensed music"
     r"|客服|助理|工作区|workspace|报表|数据分析|趋势分析|搜索摘要|低代码|无代码"
     r"|医疗|政务|知识库|决策支持|视觉生成|视频生成|营销内容",
     re.IGNORECASE,
@@ -860,6 +864,8 @@ AUDIO_MUSIC_GAME_QUERIES = [
     "AI melody harmony chord arrangement mixing plugin",
     "AI sound effect reaper wwise criware logic cubase",
     "AI music composition DAW VST MIDI workflow",
+    "AI music copyright licensing Content ID",
+    "AI copyright music replacement YouTube",
     "AI game development tutorial",
     "AI sound design workflow",
     "AI voice synthesis tutorial",
@@ -896,6 +902,9 @@ AI_AUDIO_DISCOVERY_QUERIES = [
     "AI编曲",
     "AI混音",
     "AI音效",
+    "AI版权 音乐 授权",
+    "生成式AI 版权 音乐",
+    "YouTube AI 版权 音乐",
     "全双工语音",
     "语音交互 AI",
 ]
@@ -909,6 +918,8 @@ ORDINARY_HINT_TERMS = [
     r"Google AI Overview", r"AI Overview", r"Copilot Search", r"TrendRadar", r"Runway", r"Stable Diffusion",
     r"ChatGPT 插件", r"AI工作区", r"智能客服", r"低代码", r"无代码", r"Lynx", r"Apidog",
     r"AI 音频", r"AI 音乐", r"AI 游戏", r"voice AI", r"music AI", r"game AI",
+    r"AI 版权", r"AI 著作权", r"AI 版權", r"AI copyright", r"generative AI copyright",
+    r"copyright AI", r"Content ID", r"licensed music",
     r"语音生成", r"语音克隆", r"音乐生成", r"游戏开发AI", r"AI编程", r"浏览器AI",
     r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
@@ -922,6 +933,7 @@ REQUIRED_TERMS = [
     r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
     r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
+    r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
 EXCLUDE_TERMS = [
@@ -940,6 +952,8 @@ AI_CORE_TERMS = [
     r"MedRAG", r"KAG", r"Runway", r"Stable Diffusion", r"TrendRadar", r"Copilot Search",
     r"Google AI Overview", r"AI Overview", r"Lynx", r"Apidog", r"ChatGPT 插件", r"AI工作区",
     r"AI\s*音频", r"AI\s*音乐", r"AI\s*游戏", r"voice\s*AI", r"music\s*AI", r"game\s*AI",
+    r"AI\s*版权", r"AI\s*著作权", r"AI\s*版權", r"AI\s*著作權", r"AI\s*copyright", r"generative\s*AI.{0,20}copyright",
+    r"版权.{0,20}AI", r"版權.{0,20}AI", r"著作权.{0,20}AI", r"著作權.{0,20}AI", r"Content ID", r"licensed music",
     r"语音识别", r"语音克隆", r"语音合成", r"AI编程", r"浏览器AI", r"Gemini\s*Skills",
     r"\bASR\b", r"\bTTS\b", r"Veo", r"Sora", r"音频生成", r"音乐生成",
     r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
@@ -958,6 +972,7 @@ PRACTICE_REQUIRED_TERMS = [
     r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
     r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
     r"搜索摘要", r"知识库", r"报表", r"工作区", r"客服", r"低代码", r"无代码",
+    r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
 NON_ACTIONABLE_URL_FILTER = re.compile(
@@ -999,6 +1014,16 @@ PRACTICE_EXCLUDED_TOPIC_FILTER = re.compile(
     r"航天|卫星|太空|激光通信|火箭|航空航天|space\b|satellite|aerospace"
     r"|医疗|医院|医生|诊室|疗效|病人|看病|临床|medical|doctor|hospital|clinic"
     r"|售罄|短缺|缺货|高价转售|转售|发货|黄牛|eBay|ebay|scalper|resale|out of stock|sold out",
+    re.IGNORECASE,
+)
+
+AI_COPYRIGHT_PATTERN = re.compile(
+    r"AI.{0,30}(版权|版權|著作权|著作權|授权|授權|侵权|侵權|版税|版稅|版权音乐|版權音樂|版权处理|版權處理|版权替换|版權替換|内容识别|內容識別)"
+    r"|(?:版权|版權|著作权|著作權|授权|授權|侵权|侵權|版税|版稅|版权音乐|版權音樂|版权处理|版權處理|版权替换|版權替換|内容识别|內容識別).{0,30}AI"
+    r"|generative\s*AI.{0,40}(copyright|rights|licens|royalt|Content ID)"
+    r"|AI.{0,40}(copyright|rights|licens|royalt|Content ID)"
+    r"|copyrighted.{0,40}(video|music|song|audio)"
+    r"|Content ID|rights management|licensed music|copyright replacement",
     re.IGNORECASE,
 )
 
@@ -4512,6 +4537,21 @@ def frontier_innovation_gate(item):
     return False
 
 
+def is_ai_copyright_item(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not AI_COPYRIGHT_PATTERN.search(text):
+        return False
+    ai_hit = bool(AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|人工智能|生成式|generative\s*AI", text, re.IGNORECASE))
+    if not ai_hit:
+        return False
+    # 偏向平台功能、内容创作、音乐授权处理；单纯诉讼/争议仍交给通用过滤器。
+    return bool(re.search(
+        r"音乐|音樂|音频|音頻|视频|影片|創作|创作|生成|替换|替換|授权|授權|版权处理|版權處理|版权音乐|版權音樂|Content ID|YouTube|rights management|licensed music|copyright replacement",
+        text,
+        re.IGNORECASE,
+    ))
+
+
 def practical_keyword_gate(item):
     """
     实用导向硬门槛：
@@ -4525,7 +4565,8 @@ def practical_keyword_gate(item):
 
     if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
         return True
-    if EXCLUDE_PATTERN.search(support_text):
+    copyright_hit = is_ai_copyright_item(item)
+    if EXCLUDE_PATTERN.search(support_text) and not copyright_hit:
         return False
     if is_non_actionable_page(item):
         return False
@@ -4535,6 +4576,8 @@ def practical_keyword_gate(item):
         return False
     if not AI_CORE_PATTERN.search(core_text):
         return False
+    if copyright_hit:
+        return True
     if not PRACTICE_REQUIRED_PATTERN.search(support_text):
         return False
     return True
@@ -6594,6 +6637,8 @@ def practical_relevance_score(item):
         score += 2
     if is_high_value_practical_example(item):
         score += 8
+    if is_ai_copyright_item(item):
+        score += 6
 
     if LOW_VALUE_SIGNAL.search(text):
         score -= 3
@@ -6675,11 +6720,12 @@ def pool_bucket(item):
     reliable_source = item.get("source") in SOURCE_REGISTRY
     practical_hit = is_practical_candidate(item)
     frontier_hit = frontier_innovation_gate(item)
+    copyright_hit = is_ai_copyright_item(item)
     practice_required_hit = bool(PRACTICE_REQUIRED_PATTERN.search(build_item_filter_text(item, include_query=True)))
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
     is_priority_wechat = bool(item.get("is_priority_wechat"))
 
-    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit):
+    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit or copyright_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit or copyright_hit):
         return "A"
     if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
@@ -6720,6 +6766,8 @@ def is_practical_candidate(item):
         return False
     if not ai_core_hit:
         return False
+    if is_ai_copyright_item(item):
+        return True
     if is_priority_wechat and (practice_required_hit or experience_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
         return True
     if frontier_innovation_gate(item):
@@ -6948,6 +6996,8 @@ def calculate_heat_score(item):
         heat += 18
     if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         heat += 22
+    if is_ai_copyright_item(item):
+        heat += 48
     if is_high_value_audio_example(item):
         heat += 80
     if is_high_value_practical_example(item):
@@ -7493,6 +7543,8 @@ TAG_RULES = [
      "实用", "tag-product", "\U0001f6e0\ufe0f"),
     (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|midi|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", re.I),
      "音频AI", "tag-product", "\U0001f3a7"),
+    (re.compile(r"AI版权|AI著作权|AI版權|AI著作權|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|Content ID|copyright|licensed music|rights management", re.I),
+     "AI版权", "tag-policy", "\U0001f4dc"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
     (re.compile(r"open.?source|hugging|apache|mit.license|开源", re.I),
