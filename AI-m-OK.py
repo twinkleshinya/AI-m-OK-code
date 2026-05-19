@@ -15,10 +15,12 @@ AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 
 import json
 import os
+import queue
 import random
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 import shutil
 from datetime import datetime, timezone, timedelta
@@ -78,11 +80,17 @@ def _unique_webhooks(webhooks):
 FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
     "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
-])
+    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
+] + _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", "")))
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     *FEISHU_WEBHOOKS,
 }
 REVIEW_NOTIFY_WEBHOOKS = []
+
+FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "5"))
+FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "15"))
+FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "25"))
+FEISHU_PUSH_RETRIES = max(1, int(os.environ.get("FEISHU_PUSH_RETRIES", "2")))
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -8608,27 +8616,58 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         },
     }
 
-def push_feishu_to_webhooks(payload, webhooks, label_prefix):
-    success_count = 0
-    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
-    print(f"      飞书推送开始: {len(valid_webhooks)} 个机器人")
-    for i, webhook in enumerate(valid_webhooks, 1):
+def _post_feishu_webhook_hard_timeout(webhook, payload):
+    result_queue = queue.Queue(maxsize=1)
+
+    def worker():
         try:
-            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)}")
             resp = requests.post(
                 webhook.strip(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=(5, 15),
+                timeout=(FEISHU_CONNECT_TIMEOUT, FEISHU_READ_TIMEOUT),
             )
-            result = resp.json()
+            try:
+                body = resp.json()
+            except Exception:
+                body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
+            result_queue.put(("ok", body))
+        except Exception as exc:
+            result_queue.put(("error", repr(exc)))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(FEISHU_HARD_TIMEOUT)
+    if thread.is_alive():
+        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+    try:
+        status, result = result_queue.get_nowait()
+    except queue.Empty:
+        return False, {"error": "empty_response"}
+    if status == "error":
+        return False, {"error": result}
+    return True, result
+
+
+def push_feishu_to_webhooks(payload, webhooks, label_prefix):
+    success_count = 0
+    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    print(
+        f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
+        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
+    )
+    for i, webhook in enumerate(valid_webhooks, 1):
+        for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
+            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
+            ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
+            if not ok:
+                print(f"[ERROR] Feishu push failed -> {label_prefix}{i} attempt {attempt}: {result}")
+                continue
             if result.get("StatusCode") == 0 or result.get("code") == 0:
                 print(f"[OK] Feishu push succeeded ✅ -> {label_prefix}{i}")
                 success_count += 1
-            else:
-                print(f"[WARN] Feishu response -> {label_prefix}{i}: {result}")
-        except Exception as e:
-            print(f"[ERROR] Feishu push failed -> {label_prefix}{i}: {e}")
+                break
+            print(f"[WARN] Feishu response -> {label_prefix}{i} attempt {attempt}: {result}")
     return success_count > 0
 
 
