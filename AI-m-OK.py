@@ -8750,8 +8750,8 @@ def _save_positive_sample_library(samples):
 def _subscribe_learned_accounts(account_names):
     account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
     if not account_names:
-        return {"added": 0, "existing": 0, "failed": 0}
-    stats = {"added": 0, "existing": 0, "failed": 0}
+        return {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
+    stats = {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     for base in WERSS_BASES:
         token = _werss_login(base)
         if not token:
@@ -8767,8 +8767,10 @@ def _subscribe_learned_accounts(account_names):
                 existing[account.lower()] = {"mp_name": info}
             else:
                 stats["failed"] += 1
+                stats["failed_accounts"].append({"account": account, "reason": info})
         return stats
     stats["failed"] += len(account_names)
+    stats["failed_accounts"].extend({"account": account, "reason": "login_failed"} for account in account_names)
     return stats
 
 
@@ -8851,6 +8853,9 @@ def learn_positive_samples_only():
     print(f"\n[OK] 样例学习完成: 新学习 {len(learned)} 条, AI音频 {audio_count} 条, 失败 {len(failed)} 条")
     print(f"[OK] 正样本库: {POSITIVE_SAMPLE_LIBRARY_FILE}")
     print(f"[OK] WeRSS 订阅: 新增 {sub_stats['added']} 个, 已有 {sub_stats['existing']} 个, 失败 {sub_stats['failed']} 个")
+    if sub_stats.get("failed_accounts"):
+        details = "；".join(f"{row.get('account')}({row.get('reason')})" for row in sub_stats["failed_accounts"])
+        print(f"[INFO] WeRSS 未能订阅公众号: {details}")
     print("[INFO] 只学习模式不会生成审核页，也不会推送飞书。")
 
 
