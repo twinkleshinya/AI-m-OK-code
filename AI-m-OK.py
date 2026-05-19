@@ -743,6 +743,7 @@ PRACTICAL_SIGNAL = re.compile(
     r"|benchmark|评测|对比|实践|落地|效率|提效|办公|生产力|运营|销售|客服|数据分析"
     r"|skill|skills|skillset|agentic|copilot|n8n|zapier|make\.com|dify|coze|metagpt|langflow|langgraph"
     r"|medrag|kag|trendradar|报表自动化|AI报表|智能客服|客服助手|工作区|workspace"
+    r"|团队协作|团队管理|项目管理|企业管理|企业工作台|企业协作|协作文档|白板|无限画布|画布|canvas|whiteboard"
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
     r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
     r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase"
@@ -757,14 +758,16 @@ PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
     r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音|旋律|和声|和弦|音符|编曲|效果器"
     r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios"
     r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
-    r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
+    r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程"
+    r"|团队协作|团队管理|项目管理|任务管理|企业管理|企业工作台|协作文档|白板|无限画布|画布|canvas|whiteboard",
     re.IGNORECASE,
 )
 
 REUSABLE_SIGNAL = re.compile(
     r"open.?source|repo|github|模板|template|脚手架|boilerplate|sdk|api|示例代码|代码仓库"
     r"|插件市场|workflow模板|automation模板|prompt模板|agent模板|工程模板"
-    r"|低代码模板|无代码模板|RAG平台|知识库模板|工作区模板|客服模板|报表模板",
+    r"|低代码模板|无代码模板|RAG平台|知识库模板|工作区模板|客服模板|报表模板"
+    r"|团队模板|项目模板|管理模板|画布模板|白板模板|协作模板",
     re.IGNORECASE,
 )
 
@@ -786,6 +789,7 @@ APPLICATION_SIGNAL = re.compile(
     r"|音频制作|播客制作|配音工作流|语音克隆|字幕转写|音频后期|音乐生成"
     r"|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|内容识别|內容識別|Content ID|rights management|licensed music"
     r"|客服|助理|工作区|workspace|报表|数据分析|趋势分析|搜索摘要|低代码|无代码"
+    r"|团队协作|团队管理|项目管理|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|canvas|whiteboard"
     r"|医疗|政务|知识库|决策支持|视觉生成|视频生成|营销内容",
     re.IGNORECASE,
 )
@@ -819,6 +823,11 @@ SOCIAL_PRACTICAL_QUERIES = [
     "DeepSeek Qwen Claude 实战",
     "Google AI Overview Copilot Search 教程",
     "ChatGPT 插件 AI 工作区 实战",
+    "AI 团队协作 管理 工具",
+    "AI 无限画布 团队 管理",
+    "AI 企业工作台 项目管理",
+    "AI whiteboard infinite canvas team workspace",
+    "AI team collaboration project management tool",
     "Stable Diffusion Runway 教程",
     "TrendRadar AI 报表 工具",
     "Lynx Apidog AI 低代码 教程",
@@ -846,6 +855,8 @@ MODEL_INNOVATION_QUERIES = [
     "RAG platform release workflow",
     "AI search summary workflow",
     "AI workspace assistant tutorial",
+    "AI team workspace collaboration tool",
+    "AI infinite canvas whiteboard launch",
     "OpenAI model release",
     "Anthropic Claude release",
     "Google Gemini release",
@@ -917,6 +928,9 @@ ORDINARY_HINT_TERMS = [
     r"DeepSeek", r"Qwen", r"Claude Code", r"Codex", r"OpenAI", r"Anthropic", r"Gemini",
     r"Google AI Overview", r"AI Overview", r"Copilot Search", r"TrendRadar", r"Runway", r"Stable Diffusion",
     r"ChatGPT 插件", r"AI工作区", r"智能客服", r"低代码", r"无代码", r"Lynx", r"Apidog",
+    r"AI团队", r"AI 团队", r"AI协作", r"AI 协作", r"AI企业管理", r"AI 企业管理",
+    r"AI项目管理", r"AI 项目管理", r"AI无限画布", r"AI 无限画布", r"AI画布", r"AI 画布",
+    r"AI whiteboard", r"AI canvas", r"AI workspace", r"AI collaboration",
     r"AI 音频", r"AI 音乐", r"AI 游戏", r"voice AI", r"music AI", r"game AI",
     r"AI 版权", r"AI 著作权", r"AI 版權", r"AI copyright", r"generative AI copyright",
     r"copyright AI", r"Content ID", r"licensed music",
@@ -933,6 +947,8 @@ REQUIRED_TERMS = [
     r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
     r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
+    r"团队协作", r"团队管理", r"项目管理", r"任务管理", r"企业管理", r"企业工作台",
+    r"协作文档", r"白板", r"无限画布", r"画布", r"canvas", r"whiteboard",
     r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
@@ -951,9 +967,11 @@ AI_CORE_TERMS = [
     r"Copilot", r"Codex", r"Cursor", r"Coze", r"n8n", r"Zapier", r"Make\.com",
     r"MedRAG", r"KAG", r"Runway", r"Stable Diffusion", r"TrendRadar", r"Copilot Search",
     r"Google AI Overview", r"AI Overview", r"Lynx", r"Apidog", r"ChatGPT 插件", r"AI工作区",
+    r"AI\s*团队", r"AI\s*协作", r"AI\s*企业管理", r"AI\s*项目管理", r"AI\s*任务管理",
+    r"AI\s*无限画布", r"AI\s*画布", r"AI\s*whiteboard", r"AI\s*canvas", r"AI\s*workspace", r"AI\s*collaboration",
     r"AI\s*音频", r"AI\s*音乐", r"AI\s*游戏", r"voice\s*AI", r"music\s*AI", r"game\s*AI",
     r"AI\s*版权", r"AI\s*著作权", r"AI\s*版權", r"AI\s*著作權", r"AI\s*copyright", r"generative\s*AI.{0,20}copyright",
-    r"版权.{0,20}AI", r"版權.{0,20}AI", r"著作权.{0,20}AI", r"著作權.{0,20}AI", r"Content ID", r"licensed music",
+    r"版权.{0,20}AI", r"版權.{0,20}AI", r"著作权.{0,20}AI", r"著作權.{0,20}AI",
     r"语音识别", r"语音克隆", r"语音合成", r"AI编程", r"浏览器AI", r"Gemini\s*Skills",
     r"\bASR\b", r"\bTTS\b", r"Veo", r"Sora", r"音频生成", r"音乐生成",
     r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
@@ -972,6 +990,8 @@ PRACTICE_REQUIRED_TERMS = [
     r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
     r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
     r"搜索摘要", r"知识库", r"报表", r"工作区", r"客服", r"低代码", r"无代码",
+    r"团队协作", r"团队管理", r"项目管理", r"任务管理", r"企业管理", r"企业工作台",
+    r"协作文档", r"白板", r"无限画布", r"画布", r"canvas", r"whiteboard",
     r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
@@ -1024,6 +1044,14 @@ AI_COPYRIGHT_PATTERN = re.compile(
     r"|AI.{0,40}(copyright|rights|licens|royalt|Content ID)"
     r"|copyrighted.{0,40}(video|music|song|audio)"
     r"|Content ID|rights management|licensed music|copyright replacement",
+    re.IGNORECASE,
+)
+
+AI_TEAM_TOOL_PATTERN = re.compile(
+    r"AI.{0,30}(团队|协作|協作|项目管理|项目协作|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|工作区)"
+    r"|(?:团队|协作|協作|项目管理|项目协作|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|工作区).{0,30}AI"
+    r"|AI.{0,30}(team|collaboration|collaborative|workspace|project management|task management|whiteboard|infinite canvas|canvas|enterprise management|knowledge management)"
+    r"|(?:team|collaboration|collaborative|workspace|project management|task management|whiteboard|infinite canvas|canvas|enterprise management|knowledge management).{0,30}AI",
     re.IGNORECASE,
 )
 
@@ -4552,6 +4580,24 @@ def is_ai_copyright_item(item):
     ))
 
 
+def is_ai_team_management_tool_item(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not AI_TEAM_TOOL_PATTERN.search(text):
+        return False
+    if re.search(r"without\s+AI|no\s+AI|non[-\s]?AI|不含AI|没有AI|無AI|沒有AI|非AI", text, re.IGNORECASE):
+        return False
+    if not (AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|人工智能|生成式|大模型", text, re.IGNORECASE)):
+        return False
+    if is_business_finance_noise(item) or is_security_or_hype_noise(item):
+        return False
+    return bool(re.search(
+        r"团队|协作|協作|项目|任务|企业|工作台|工作区|知识库|知识管理|文档|白板|无限画布|画布"
+        r"|team|collaboration|collaborative|project|task|workspace|whiteboard|canvas|knowledge",
+        text,
+        re.IGNORECASE,
+    ))
+
+
 def practical_keyword_gate(item):
     """
     实用导向硬门槛：
@@ -4566,7 +4612,8 @@ def practical_keyword_gate(item):
     if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
         return True
     copyright_hit = is_ai_copyright_item(item)
-    if EXCLUDE_PATTERN.search(support_text) and not copyright_hit:
+    team_tool_hit = is_ai_team_management_tool_item(item)
+    if EXCLUDE_PATTERN.search(support_text) and not (copyright_hit or team_tool_hit):
         return False
     if is_non_actionable_page(item):
         return False
@@ -4577,6 +4624,8 @@ def practical_keyword_gate(item):
     if not AI_CORE_PATTERN.search(core_text):
         return False
     if copyright_hit:
+        return True
+    if team_tool_hit:
         return True
     if not PRACTICE_REQUIRED_PATTERN.search(support_text):
         return False
@@ -6639,6 +6688,8 @@ def practical_relevance_score(item):
         score += 8
     if is_ai_copyright_item(item):
         score += 6
+    if is_ai_team_management_tool_item(item):
+        score += 6
 
     if LOW_VALUE_SIGNAL.search(text):
         score -= 3
@@ -6721,11 +6772,12 @@ def pool_bucket(item):
     practical_hit = is_practical_candidate(item)
     frontier_hit = frontier_innovation_gate(item)
     copyright_hit = is_ai_copyright_item(item)
+    team_tool_hit = is_ai_team_management_tool_item(item)
     practice_required_hit = bool(PRACTICE_REQUIRED_PATTERN.search(build_item_filter_text(item, include_query=True)))
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
     is_priority_wechat = bool(item.get("is_priority_wechat"))
 
-    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit or copyright_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit or copyright_hit):
+    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit or copyright_hit or team_tool_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit or copyright_hit or team_tool_hit):
         return "A"
     if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
@@ -6767,6 +6819,8 @@ def is_practical_candidate(item):
     if not ai_core_hit:
         return False
     if is_ai_copyright_item(item):
+        return True
+    if is_ai_team_management_tool_item(item):
         return True
     if is_priority_wechat and (practice_required_hit or experience_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
         return True
@@ -6998,6 +7052,8 @@ def calculate_heat_score(item):
         heat += 22
     if is_ai_copyright_item(item):
         heat += 48
+    if is_ai_team_management_tool_item(item):
+        heat += 44
     if is_high_value_audio_example(item):
         heat += 80
     if is_high_value_practical_example(item):
@@ -7545,6 +7601,8 @@ TAG_RULES = [
      "音频AI", "tag-product", "\U0001f3a7"),
     (re.compile(r"AI版权|AI著作权|AI版權|AI著作權|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|Content ID|copyright|licensed music|rights management", re.I),
      "AI版权", "tag-policy", "\U0001f4dc"),
+    (re.compile(r"AI团队|AI协作|AI企业管理|AI项目管理|AI任务管理|AI无限画布|AI画布|AI白板|AI工作区|team collaboration|project management|whiteboard|infinite canvas|AI canvas|AI workspace", re.I),
+     "团队工具", "tag-product", "\U0001f5c2\ufe0f"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
     (re.compile(r"open.?source|hugging|apache|mit.license|开源", re.I),
