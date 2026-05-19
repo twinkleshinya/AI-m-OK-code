@@ -14,6 +14,7 @@ AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 """
 
 import json
+import hashlib
 import os
 import queue
 import random
@@ -23,6 +24,7 @@ import subprocess
 import threading
 import time
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from html import escape, unescape
@@ -113,6 +115,12 @@ PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
 STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
+SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
+SUMMARY_CACHE_VERSION = os.environ.get("SUMMARY_CACHE_VERSION", "summary-v4.5-practical")
+SUMMARY_CACHE_MAX_ITEMS = int(os.environ.get("SUMMARY_CACHE_MAX_ITEMS", "2500"))
+LINK_CHECK_CACHE_FILE = Path(os.environ.get("LINK_CHECK_CACHE_FILE", str(STATE_DIR / "link_check_cache.json")))
+LINK_CHECK_CACHE_TTL_HOURS = float(os.environ.get("LINK_CHECK_CACHE_TTL_HOURS", "72"))
+LINK_CHECK_MAX_WORKERS = max(1, int(os.environ.get("LINK_CHECK_MAX_WORKERS", "8")))
 SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
 POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
 POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
@@ -7388,6 +7396,100 @@ def enforce_diversity_with_pool(items):
 # Ollama 生成中文标题与摘要（v3.0 重构）
 # ══════════════════════════════════════════════════════════════════════════════
 
+_SUMMARY_CACHE = None
+_LINK_CHECK_CACHE = None
+_LINK_CHECK_CACHE_LOCK = threading.Lock()
+
+
+def _load_json_cache(path):
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_json_cache(path, data):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"      [WARN] 缓存写入失败: {path} ({exc})")
+
+
+def _stable_hash(text):
+    return hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _summary_cache_key(item):
+    url = canonicalize_url_for_history(item.get("url", "")) or str(item.get("url", "") or "").rstrip("/")
+    material = "|".join([
+        SUMMARY_CACHE_VERSION,
+        OLLAMA_MODEL,
+        url,
+        str(item.get("source", "") or ""),
+        str(item.get("title", "") or ""),
+        str(item.get("summary", "") or ""),
+    ])
+    return _stable_hash(material)
+
+
+def _load_summary_cache():
+    global _SUMMARY_CACHE
+    if _SUMMARY_CACHE is None:
+        _SUMMARY_CACHE = _load_json_cache(SUMMARY_CACHE_FILE)
+    return _SUMMARY_CACHE
+
+
+def _apply_summary_cache(item, index, total):
+    key = _summary_cache_key(item)
+    entry = _load_summary_cache().get(key)
+    if not isinstance(entry, dict):
+        return key, False
+    if entry.get("remove"):
+        item["_remove"] = True
+        print(f"      [{index}/{total}] ⚡ 摘要缓存命中：已过滤 {item.get('title', '')[:40]}")
+        return key, True
+    for field in ("title_zh", "summary_zh", "emoji_override", "category"):
+        if field in entry:
+            item[field] = entry[field]
+    if item.get("title_zh") and item.get("summary_zh"):
+        print(f"      [{index}/{total}] ⚡ 摘要缓存命中: {item['title_zh'][:40]}")
+        return key, True
+    return key, False
+
+
+def _store_summary_cache(item, key):
+    if not key or item.get("_summary_generation_failed"):
+        return
+    cache = _load_summary_cache()
+    cache[key] = {
+        "saved_at": time.time(),
+        "url": canonicalize_url_for_history(item.get("url", "")) or item.get("url", ""),
+        "title": item.get("title", ""),
+        "remove": bool(item.get("_remove")),
+        "title_zh": item.get("title_zh", ""),
+        "summary_zh": item.get("summary_zh", ""),
+        "emoji_override": item.get("emoji_override", ""),
+        "category": item.get("category", "AI"),
+    }
+    if len(cache) > SUMMARY_CACHE_MAX_ITEMS:
+        keep = sorted(
+            cache.items(),
+            key=lambda pair: float(pair[1].get("saved_at", 0) or 0),
+            reverse=True,
+        )[:SUMMARY_CACHE_MAX_ITEMS]
+        cache.clear()
+        cache.update(dict(keep))
+
+
+def _flush_summary_cache():
+    if _SUMMARY_CACHE is not None:
+        _save_json_cache(SUMMARY_CACHE_FILE, _SUMMARY_CACHE)
+
+
 def _generate_single_summary(item, index, total):
     src_info = get_source_info(item["source"])
     src_tag = "国内" if src_info["type"] == "domestic" else "国际"
@@ -7567,24 +7669,33 @@ URL: {item['url']}"""
             print(f"      [{index}/{total}] ⚠️ JSON解析失败，使用原文: {item['title'][:40]}")
             item["title_zh"] = item["title"]
             item["summary_zh"] = item["summary"]
+            item["_summary_generation_failed"] = True
     except Exception as e:
         print(f"      [{index}/{total}] ❌ Ollama调用失败: {e}")
         item["title_zh"] = item["title"]
         item["summary_zh"] = item["summary"]
+        item["_summary_generation_failed"] = True
 
 def generate_chinese_summaries(items):
     total = len(items)
     print(f"      逐条调用 Ollama ({OLLAMA_MODEL})，共 {total} 条...")
-    print(f"      [v3.3] 已启用文章正文/视频字幕抓取 + 实用导向 + 反幻觉校验")
+    print(f"      [v4.6] 已启用文章正文/视频字幕抓取 + 摘要缓存 + 实用导向 + 反幻觉校验")
 
+    cache_hits = 0
     for i, item in enumerate(items, 1):
+        cache_key, cached = _apply_summary_cache(item, i, total)
+        if cached:
+            cache_hits += 1
+            continue
         _generate_single_summary(item, i, total)
+        _store_summary_cache(item, cache_key)
         if i < total:
             time.sleep(0.5)
+    _flush_summary_cache()
 
     filtered_count = sum(1 for it in items if it.get("_remove"))
     items = [it for it in items if not it.get("_remove")]
-    print(f"      完成: {total} 条已处理, {filtered_count} 条被过滤为非AI相关")
+    print(f"      完成: {total} 条已处理, 摘要缓存命中 {cache_hits} 条, {filtered_count} 条被过滤为非AI相关")
 
     for item in items:
         if "title_zh" not in item:
@@ -8327,6 +8438,47 @@ def select_audio_section_items(items, limit=None):
     return select_audio_review_candidates(items, limit=limit)
 
 
+def _link_check_cache_key(url):
+    return _stable_hash(canonicalize_url_for_history(url) or str(url or "").rstrip("/"))
+
+
+def _load_link_check_cache():
+    global _LINK_CHECK_CACHE
+    with _LINK_CHECK_CACHE_LOCK:
+        if _LINK_CHECK_CACHE is None:
+            _LINK_CHECK_CACHE = _load_json_cache(LINK_CHECK_CACHE_FILE)
+    return _LINK_CHECK_CACHE
+
+
+def _get_cached_link_check(url):
+    cache = _load_link_check_cache()
+    with _LINK_CHECK_CACHE_LOCK:
+        entry = cache.get(_link_check_cache_key(url))
+    if not isinstance(entry, dict):
+        return None
+    checked_at = float(entry.get("checked_at", 0) or 0)
+    if time.time() - checked_at > LINK_CHECK_CACHE_TTL_HOURS * 3600:
+        return None
+    if "accessible" in entry:
+        return bool(entry.get("accessible"))
+    return None
+
+
+def _store_link_check(url, accessible):
+    cache = _load_link_check_cache()
+    with _LINK_CHECK_CACHE_LOCK:
+        cache[_link_check_cache_key(url)] = {
+            "checked_at": time.time(),
+            "url": canonicalize_url_for_history(url) or str(url or "").rstrip("/"),
+            "accessible": bool(accessible),
+        }
+
+
+def _flush_link_check_cache():
+    if _LINK_CHECK_CACHE is not None:
+        _save_json_cache(LINK_CHECK_CACHE_FILE, _LINK_CHECK_CACHE)
+
+
 def is_item_link_accessible(item):
     url = str(item.get("url", "") or "").strip()
     if not url:
@@ -8335,6 +8487,9 @@ def is_item_link_accessible(item):
         return False
     if "mp.weixin.qq.com/" not in url:
         return True
+    cached = _get_cached_link_check(url)
+    if cached is not None:
+        return cached
     try:
         session = requests.Session()
         session.trust_env = False
@@ -8350,7 +8505,9 @@ def is_item_link_accessible(item):
             body,
             re.IGNORECASE,
         ):
+            _store_link_check(url, False)
             return False
+        _store_link_check(url, True)
         return True
     except Exception:
         # 微信文章很容易因为反爬、代理或本机网络被误判；审核前只拦截明确删除/不可见的页面。
@@ -8358,15 +8515,31 @@ def is_item_link_accessible(item):
 
 
 def filter_inaccessible_items(items):
-    kept = []
-    filtered_count = 0
-    for item in items:
-        if not is_item_link_accessible(item):
-            filtered_count += 1
-            continue
-        kept.append(item)
+    if not items:
+        return []
+    results = [True] * len(items)
+    workers = min(LINK_CHECK_MAX_WORKERS, max(1, len(items)))
+    if workers == 1 or len(items) <= 2:
+        for idx, item in enumerate(items):
+            results[idx] = is_item_link_accessible(item)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {
+                executor.submit(is_item_link_accessible, item): idx
+                for idx, item in enumerate(items)
+            }
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    results[idx] = bool(future.result())
+                except Exception:
+                    results[idx] = True
+    _flush_link_check_cache()
+    kept = [item for item, ok in zip(items, results) if ok]
+    filtered_count = len(items) - len(kept)
     if filtered_count:
         print(f"      [v3.7] 明确不可访问链接过滤: {filtered_count} 条")
+    print(f"      [v4.6] 链接检查完成: {len(items)} 条, 并发 {workers}, 缓存TTL {LINK_CHECK_CACHE_TTL_HOURS:g}h")
     return kept
 
 
