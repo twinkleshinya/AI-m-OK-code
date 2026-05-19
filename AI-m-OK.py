@@ -8611,13 +8611,15 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
 def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     success_count = 0
     valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    print(f"      飞书推送开始: {len(valid_webhooks)} 个机器人")
     for i, webhook in enumerate(valid_webhooks, 1):
         try:
+            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)}")
             resp = requests.post(
                 webhook.strip(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=15,
+                timeout=(5, 15),
             )
             result = resp.json()
             if result.get("StatusCode") == 0 or result.get("code") == 0:

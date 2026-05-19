@@ -670,7 +670,14 @@ def start_review_server(
             print(f"  [WARN] 审核链接通知失败: {exc}")
 
     webbrowser.open(url)
-    review_result.completed.wait()
+    while not review_result.completed.wait(timeout=1):
+        if not server_thread.is_alive():
+            print("  [ERROR] 审核服务线程已停止，本次不推送。")
+            try:
+                server.server_close()
+            except Exception:
+                pass
+            return []
 
     try:
         server.shutdown()
