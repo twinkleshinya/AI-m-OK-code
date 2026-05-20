@@ -316,6 +316,7 @@ HIGH_VALUE_AUDIO_URL_TOKENS = {
     "nJ1ee0SoN5pEp-8QQ7Yarw",
     "SOcVnJ9SFGMfVwKX_ifHeA",
     "8KjYfCn0FZMIw64HzuB3kw",
+    "cAdZhe7d3mJMWbeSUAYj5Q",
 }
 HIGH_VALUE_PRACTICAL_URL_TOKENS = {
     "vN7S3V8obJ1dpecp0rYADQ",
@@ -8591,6 +8592,7 @@ def build_review_feedback_records(all_review_items, selected_items):
             "selected_rank": selected_rank_map.get(url, 0),
             "source": item.get("source", ""),
             "category": item.get("category", ""),
+            "review_section": item.get("_review_section", ""),
             "domain": domain,
             "account_name": item.get("account_name", ""),
             "pool": item.get("_pool", ""),
@@ -9473,8 +9475,11 @@ def main():
 
     final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
     selected_audio_urls = {
-        url for url in final_by_url
-        if url in audio_review_urls
+        url for url, item in final_by_url.items()
+        if (
+            item.get("_review_section") == "audio"
+            or (not item.get("_review_section") and url in audio_review_urls)
+        )
     }
     selected_audio_pool = [final_by_url[url] for url in selected_audio_urls]
     if not selected_audio_pool:

@@ -132,6 +132,18 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             cursor: pointer;
         }}
         .feedback-chip.active {{ background: #243247; color: #fff; border-color: #60a5fa; }}
+        .section-editor {{ display: flex; align-items: center; gap: 8px; margin: 10px 0 12px; }}
+        .section-label {{ font-size: 12px; color: #8b949e; font-weight: 800; }}
+        .section-select {{
+            min-width: 128px;
+            background: #0f1720;
+            color: #e6edf3;
+            border: 1px solid rgba(240,246,252,0.14);
+            border-radius: 8px;
+            padding: 7px 10px;
+            font-size: 13px;
+            font-weight: 700;
+        }}
         .status-bar {{
             position: fixed;
             bottom: 0;
@@ -293,6 +305,21 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
             updateCounts();
         }}
 
+        function applyManualSection(card, section) {{
+            if (!card) return;
+            card.dataset.reviewSection = section || '';
+            if (section === 'audio') {{
+                card.dataset.audio = '1';
+                card.dataset.category = 'AI音频';
+            }} else if (section === 'domestic') {{
+                card.dataset.audio = '0';
+                card.dataset.sourceType = 'domestic';
+            }} else if (section === 'intl') {{
+                card.dataset.audio = '0';
+                card.dataset.sourceType = 'intl';
+            }}
+        }}
+
         function filterBy(type, chipEl) {{
             document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
             chipEl.classList.add('active');
@@ -348,6 +375,7 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                     item_id: parseInt(card.dataset.itemId, 10),
                     selected: card.dataset.selected === '1',
                     labels: (card.dataset.feedback || '').split('|').filter(Boolean),
+                    section: card.dataset.reviewSection || '',
                 }};
             }});
             return {{
@@ -412,6 +440,12 @@ REVIEW_PAGE_TEMPLATE = """<!DOCTYPE html>
                     toggleFeedback(cardId, label, chip);
                 }});
             }});
+            document.querySelectorAll('.section-select').forEach(select => {{
+                select.addEventListener('change', function() {{
+                    applyManualSection(select.closest('.card'), select.value);
+                    updateCounts();
+                }});
+            }});
             refreshRanks();
             updateCounts();
         }});
@@ -424,6 +458,7 @@ REVIEW_CARD_TEMPLATE = """            <div class="card selected"
                  data-item-id="{item_id}"
                  data-source-type="{source_type}"
                  data-category="{category}"
+                 data-review-section="{review_section}"
                  data-pool="{pool}"
                  data-audio="{is_audio}"
                  data-selected="1"
@@ -449,6 +484,12 @@ REVIEW_CARD_TEMPLATE = """            <div class="card selected"
                     <button type="button" class="move-btn" onclick="moveCard(this.closest('.card'), -1)">上移</button>
                     <button type="button" class="move-btn" onclick="moveCard(this.closest('.card'), 1)">下移</button>
                     <a class="link" href="{url}" target="_blank" rel="noopener">查看原文</a>
+                </div>
+                <div class="section-editor">
+                    <span class="section-label">最终分区</span>
+                    <select class="section-select">
+                        {section_options}
+                    </select>
                 </div>
                 <div class="feedback-title">反馈标签</div>
                 <div class="feedback-group">
@@ -482,11 +523,26 @@ def _build_review_card(item, index, infer_tags_func, pick_emoji_func, get_source
         pool_label = "B池 · 补充候选"
     else:
         pool_label = "DROP"
+    if item.get("_is_audio_section"):
+        review_section = "audio"
+    elif src_info["type"] == "domestic":
+        review_section = "domestic"
+    else:
+        review_section = "intl"
+    section_options = "".join(
+        f'<option value="{value}"{" selected" if value == review_section else ""}>{escape(label)}</option>'
+        for value, label in [
+            ("intl", "国际资讯"),
+            ("domestic", "国内资讯"),
+            ("audio", "AI音频"),
+        ]
+    )
     return REVIEW_CARD_TEMPLATE.format(
         item_id=index,
         rank=index + 1,
         source_type=src_info["type"],
         category=escape(item.get("category", "AI")),
+        review_section=review_section,
         pool=pool,
         is_audio="1" if item.get("_is_audio_section") else "0",
         pool_label=pool_label,
@@ -500,6 +556,7 @@ def _build_review_card(item, index, infer_tags_func, pick_emoji_func, get_source
         practical_score=item.get("practical_score", 0),
         audio_score=item.get("audio_score", 0),
         url=escape(item["url"]),
+        section_options=section_options,
         feedback_chips=feedback_chips,
     )
 
@@ -510,7 +567,12 @@ def _build_review_page(items, infer_tags_func, pick_emoji_func, get_source_info_
     for item in items:
         cloned = dict(item)
         url = str(cloned.get("url", "") or "").rstrip("/")
-        cloned["_is_audio_section"] = bool(url and url in audio_item_urls)
+        cloned["_is_audio_section"] = bool(
+            (url and url in audio_item_urls)
+            or cloned.get("is_audio")
+            or str(cloned.get("category", "") or "") == "AI音频"
+            or str(cloned.get("manual_category", "") or "") == "AI音频"
+        )
         prepared_items.append(cloned)
 
     intl_items = [
@@ -711,6 +773,19 @@ def start_review_server(
             continue
         row = feedback_map.get(idx, {})
         item["_review_feedback_labels"] = row.get("labels", [])
+        section = str(row.get("section", "") or "").strip()
+        if section:
+            item["_review_section"] = section
+            if section == "audio":
+                item["category"] = "AI音频"
+                item["manual_category"] = "AI音频"
+                item["is_audio"] = True
+            elif section == "domestic":
+                item["source_type"] = "domestic"
+                item["is_audio"] = False
+            elif section == "intl":
+                item["source_type"] = "intl"
+                item["is_audio"] = False
         item["_review_rank"] = rank
         selected_items.append(item)
     print(f"  审核完成！用户选择了 {len(selected_items)}/{len(items)} 条")
