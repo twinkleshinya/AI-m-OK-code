@@ -82,8 +82,7 @@ def _unique_webhooks(webhooks):
 FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
     "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
-] + _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", "")))
+])
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     *FEISHU_WEBHOOKS,
 }
