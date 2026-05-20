@@ -8753,11 +8753,10 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
 
     elements.append({"tag": "hr"})
 
-    if total_count > feishu_count:
-        elements.append({
-            "tag": "markdown",
-            "content": f"<font color='grey'> 🥕 以上为今日热度最高的 {feishu_count} 条精选，完整 {total_count} 条资讯请查看网页版 👇</font>",
-        })
+    elements.append({
+        "tag": "markdown",
+        "content": "<font color='grey'> 🥕 可点击查看网页版 👇</font>",
+    })
 
     elements.append({
         "tag": "action",
@@ -8773,7 +8772,7 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         "tag": "note",
         "elements": [{
             "tag": "plain_text",
-            "content": f"由 AI'm OK 自动生成 | {date_str} | {source_count}源聚合 | 飞书精选Top{feishu_count} | 音频专项{len(audio_items)}",
+            "content": f"由 AI'm OK 自动生成 | {date_str}",
         }],
     })
 
