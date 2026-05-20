@@ -14,13 +14,17 @@ AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 """
 
 import json
+import hashlib
 import os
+import queue
 import random
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from html import escape, unescape
@@ -78,11 +82,17 @@ def _unique_webhooks(webhooks):
 FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
     "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
-])
+    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
+] + _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", "")))
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     *FEISHU_WEBHOOKS,
 }
 REVIEW_NOTIFY_WEBHOOKS = []
+
+FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "5"))
+FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "15"))
+FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "25"))
+FEISHU_PUSH_RETRIES = max(1, int(os.environ.get("FEISHU_PUSH_RETRIES", "2")))
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -105,6 +115,12 @@ PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
 STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
+SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
+SUMMARY_CACHE_VERSION = os.environ.get("SUMMARY_CACHE_VERSION", "summary-v4.5-practical")
+SUMMARY_CACHE_MAX_ITEMS = int(os.environ.get("SUMMARY_CACHE_MAX_ITEMS", "2500"))
+LINK_CHECK_CACHE_FILE = Path(os.environ.get("LINK_CHECK_CACHE_FILE", str(STATE_DIR / "link_check_cache.json")))
+LINK_CHECK_CACHE_TTL_HOURS = float(os.environ.get("LINK_CHECK_CACHE_TTL_HOURS", "72"))
+LINK_CHECK_MAX_WORKERS = max(1, int(os.environ.get("LINK_CHECK_MAX_WORKERS", "8")))
 SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
 POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
 POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
@@ -300,6 +316,7 @@ HIGH_VALUE_AUDIO_URL_TOKENS = {
     "nJ1ee0SoN5pEp-8QQ7Yarw",
     "SOcVnJ9SFGMfVwKX_ifHeA",
     "8KjYfCn0FZMIw64HzuB3kw",
+    "cAdZhe7d3mJMWbeSUAYj5Q",
 }
 HIGH_VALUE_PRACTICAL_URL_TOKENS = {
     "vN7S3V8obJ1dpecp0rYADQ",
@@ -521,6 +538,7 @@ AI_KEYWORDS = re.compile(
     r"|ai.agent|ai.model|foundation.model|reasoning.model"
     r"|ai.chip|ai.video|ai.startup|ai.fund|ai.regul|ai.safety"
     r"|sora|dall.?e|copilot.ai|cursor.ai|ai.coding"
+    r"|ai.copyright|copyrighted|content.id|rights.management|royalty|licensed.music"
     r"|deepseek|qwen|glm|baichuan|moonshot|kimi|doubao|zhipu"
     r"|大模型|人工智能|机器学习|深度学习|智能体|具身智能",
     re.IGNORECASE,
@@ -530,7 +548,8 @@ AI_KEYWORDS_ZH = re.compile(
     r"AI|人工智能|大模型|机器学习|深度学习|神经网络|自然语言处理"
     r"|生成式|智能体|大语言模型|多模态|GPT|LLM|AIGC"
     r"|DeepSeek|通义|文心|豆包|星火|智谱|月之暗面|Kimi"
-    r"|具身智能|机器人|自动驾驶|AI芯片|算力",
+    r"|具身智能|机器人|自动驾驶|AI芯片|算力"
+    r"|AI版权|AI著作权|AI版權|生成式AI.*版权|生成式AI.*版權|版权.*AI|版權.*AI|著作权.*AI|著作權.*AI",
     re.IGNORECASE,
 )
 
@@ -741,9 +760,11 @@ PRACTICAL_SIGNAL = re.compile(
     r"|benchmark|评测|对比|实践|落地|效率|提效|办公|生产力|运营|销售|客服|数据分析"
     r"|skill|skills|skillset|agentic|copilot|n8n|zapier|make\.com|dify|coze|metagpt|langflow|langgraph"
     r"|medrag|kag|trendradar|报表自动化|AI报表|智能客服|客服助手|工作区|workspace"
+    r"|团队协作|团队管理|项目管理|企业管理|企业工作台|企业协作|协作文档|白板|无限画布|画布|canvas|whiteboard"
     r"|低代码|无代码|apidog|lynx|生成式搜索|copilot search|google ai overview|ai overview"
     r"|音频|播客|podcast|voice|配音|降噪|混音|母带|转写|ASR|TTS|DAW|VST|MIDI|采样"
     r"|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase"
+    r"|AI版权|AI著作权|AI版權|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|内容识别|內容識別|Content ID|licensed music"
     r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios",
     re.IGNORECASE,
 )
@@ -754,14 +775,16 @@ PRACTICAL_EXPERIENCE_SIGNAL = re.compile(
     r"|专业创作|创作需求|自由选择|风格|角色|镜头|画面|配乐|配音|音效|声音|旋律|和声|和弦|音符|编曲|效果器"
     r"|可玩网页游戏|游戏生成|游戏创作平台|游戏素材|OpenGame|Claude Code Game Studios"
     r"|举个例子|例如|比如|案例|处理|解决|搞定|完成|产出|效果|能力|特点|适合"
-    r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程",
+    r"|创作|创造|工作台|编辑器|导出|复用|二创|素材|流程"
+    r"|团队协作|团队管理|项目管理|任务管理|企业管理|企业工作台|协作文档|白板|无限画布|画布|canvas|whiteboard",
     re.IGNORECASE,
 )
 
 REUSABLE_SIGNAL = re.compile(
     r"open.?source|repo|github|模板|template|脚手架|boilerplate|sdk|api|示例代码|代码仓库"
     r"|插件市场|workflow模板|automation模板|prompt模板|agent模板|工程模板"
-    r"|低代码模板|无代码模板|RAG平台|知识库模板|工作区模板|客服模板|报表模板",
+    r"|低代码模板|无代码模板|RAG平台|知识库模板|工作区模板|客服模板|报表模板"
+    r"|团队模板|项目模板|管理模板|画布模板|白板模板|协作模板",
     re.IGNORECASE,
 )
 
@@ -781,7 +804,9 @@ MODEL_SIGNAL = re.compile(
 APPLICATION_SIGNAL = re.compile(
     r"应用|场景|落地|部署|workflow|自动化|效率|生产力|集成|api|sdk|tool|agent|RAG|实战|教程|案例"
     r"|音频制作|播客制作|配音工作流|语音克隆|字幕转写|音频后期|音乐生成"
+    r"|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|内容识别|內容識別|Content ID|rights management|licensed music"
     r"|客服|助理|工作区|workspace|报表|数据分析|趋势分析|搜索摘要|低代码|无代码"
+    r"|团队协作|团队管理|项目管理|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|canvas|whiteboard"
     r"|医疗|政务|知识库|决策支持|视觉生成|视频生成|营销内容",
     re.IGNORECASE,
 )
@@ -815,6 +840,11 @@ SOCIAL_PRACTICAL_QUERIES = [
     "DeepSeek Qwen Claude 实战",
     "Google AI Overview Copilot Search 教程",
     "ChatGPT 插件 AI 工作区 实战",
+    "AI 团队协作 管理 工具",
+    "AI 无限画布 团队 管理",
+    "AI 企业工作台 项目管理",
+    "AI whiteboard infinite canvas team workspace",
+    "AI team collaboration project management tool",
     "Stable Diffusion Runway 教程",
     "TrendRadar AI 报表 工具",
     "Lynx Apidog AI 低代码 教程",
@@ -842,6 +872,8 @@ MODEL_INNOVATION_QUERIES = [
     "RAG platform release workflow",
     "AI search summary workflow",
     "AI workspace assistant tutorial",
+    "AI team workspace collaboration tool",
+    "AI infinite canvas whiteboard launch",
     "OpenAI model release",
     "Anthropic Claude release",
     "Google Gemini release",
@@ -860,6 +892,8 @@ AUDIO_MUSIC_GAME_QUERIES = [
     "AI melody harmony chord arrangement mixing plugin",
     "AI sound effect reaper wwise criware logic cubase",
     "AI music composition DAW VST MIDI workflow",
+    "AI music copyright licensing Content ID",
+    "AI copyright music replacement YouTube",
     "AI game development tutorial",
     "AI sound design workflow",
     "AI voice synthesis tutorial",
@@ -896,6 +930,9 @@ AI_AUDIO_DISCOVERY_QUERIES = [
     "AI编曲",
     "AI混音",
     "AI音效",
+    "AI版权 音乐 授权",
+    "生成式AI 版权 音乐",
+    "YouTube AI 版权 音乐",
     "全双工语音",
     "语音交互 AI",
 ]
@@ -908,7 +945,12 @@ ORDINARY_HINT_TERMS = [
     r"DeepSeek", r"Qwen", r"Claude Code", r"Codex", r"OpenAI", r"Anthropic", r"Gemini",
     r"Google AI Overview", r"AI Overview", r"Copilot Search", r"TrendRadar", r"Runway", r"Stable Diffusion",
     r"ChatGPT 插件", r"AI工作区", r"智能客服", r"低代码", r"无代码", r"Lynx", r"Apidog",
+    r"AI团队", r"AI 团队", r"AI协作", r"AI 协作", r"AI企业管理", r"AI 企业管理",
+    r"AI项目管理", r"AI 项目管理", r"AI无限画布", r"AI 无限画布", r"AI画布", r"AI 画布",
+    r"AI whiteboard", r"AI canvas", r"AI workspace", r"AI collaboration",
     r"AI 音频", r"AI 音乐", r"AI 游戏", r"voice AI", r"music AI", r"game AI",
+    r"AI 版权", r"AI 著作权", r"AI 版權", r"AI copyright", r"generative AI copyright",
+    r"copyright AI", r"Content ID", r"licensed music",
     r"语音生成", r"语音克隆", r"音乐生成", r"游戏开发AI", r"AI编程", r"浏览器AI",
     r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
 ]
@@ -922,6 +964,9 @@ REQUIRED_TERMS = [
     r"故事板", r"运镜", r"风格", r"处理", r"解决", r"可用", r"创作", r"创造", r"能力",
     r"可玩网页游戏", r"游戏生成", r"游戏创作平台", r"游戏素材", r"OpenGame", r"Claude Code Game Studios",
     r"客服", r"搜索摘要", r"知识库", r"报表", r"低代码", r"无代码", r"工作区",
+    r"团队协作", r"团队管理", r"项目管理", r"任务管理", r"企业管理", r"企业工作台",
+    r"协作文档", r"白板", r"无限画布", r"画布", r"canvas", r"whiteboard",
+    r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
 EXCLUDE_TERMS = [
@@ -939,7 +984,11 @@ AI_CORE_TERMS = [
     r"Copilot", r"Codex", r"Cursor", r"Coze", r"n8n", r"Zapier", r"Make\.com",
     r"MedRAG", r"KAG", r"Runway", r"Stable Diffusion", r"TrendRadar", r"Copilot Search",
     r"Google AI Overview", r"AI Overview", r"Lynx", r"Apidog", r"ChatGPT 插件", r"AI工作区",
+    r"AI\s*团队", r"AI\s*协作", r"AI\s*企业管理", r"AI\s*项目管理", r"AI\s*任务管理",
+    r"AI\s*无限画布", r"AI\s*画布", r"AI\s*whiteboard", r"AI\s*canvas", r"AI\s*workspace", r"AI\s*collaboration",
     r"AI\s*音频", r"AI\s*音乐", r"AI\s*游戏", r"voice\s*AI", r"music\s*AI", r"game\s*AI",
+    r"AI\s*版权", r"AI\s*著作权", r"AI\s*版權", r"AI\s*著作權", r"AI\s*copyright", r"generative\s*AI.{0,20}copyright",
+    r"版权.{0,20}AI", r"版權.{0,20}AI", r"著作权.{0,20}AI", r"著作權.{0,20}AI",
     r"语音识别", r"语音克隆", r"语音合成", r"AI编程", r"浏览器AI", r"Gemini\s*Skills",
     r"\bASR\b", r"\bTTS\b", r"Veo", r"Sora", r"音频生成", r"音乐生成",
     r"UniSonate", r"PersonaPlex", r"OpenGame", r"Claude Code Game Studios",
@@ -958,6 +1007,9 @@ PRACTICE_REQUIRED_TERMS = [
     r"一句指令", r"一条指令", r"故事板", r"分镜", r"运镜", r"专业创作", r"创作需求",
     r"自由选择", r"风格", r"处理", r"解决", r"举个例子", r"创作", r"创造", r"能力",
     r"搜索摘要", r"知识库", r"报表", r"工作区", r"客服", r"低代码", r"无代码",
+    r"团队协作", r"团队管理", r"项目管理", r"任务管理", r"企业管理", r"企业工作台",
+    r"协作文档", r"白板", r"无限画布", r"画布", r"canvas", r"whiteboard",
+    r"版权处理", r"版權處理", r"版权替换", r"版權替換", r"版权音乐", r"版權音樂", r"音乐授权", r"音樂授權", r"内容识别", r"內容識別", r"Content ID", r"licensed music",
 ]
 
 NON_ACTIONABLE_URL_FILTER = re.compile(
@@ -999,6 +1051,24 @@ PRACTICE_EXCLUDED_TOPIC_FILTER = re.compile(
     r"航天|卫星|太空|激光通信|火箭|航空航天|space\b|satellite|aerospace"
     r"|医疗|医院|医生|诊室|疗效|病人|看病|临床|medical|doctor|hospital|clinic"
     r"|售罄|短缺|缺货|高价转售|转售|发货|黄牛|eBay|ebay|scalper|resale|out of stock|sold out",
+    re.IGNORECASE,
+)
+
+AI_COPYRIGHT_PATTERN = re.compile(
+    r"AI.{0,30}(版权|版權|著作权|著作權|授权|授權|侵权|侵權|版税|版稅|版权音乐|版權音樂|版权处理|版權處理|版权替换|版權替換|内容识别|內容識別)"
+    r"|(?:版权|版權|著作权|著作權|授权|授權|侵权|侵權|版税|版稅|版权音乐|版權音樂|版权处理|版權處理|版权替换|版權替換|内容识别|內容識別).{0,30}AI"
+    r"|generative\s*AI.{0,40}(copyright|rights|licens|royalt|Content ID)"
+    r"|AI.{0,40}(copyright|rights|licens|royalt|Content ID)"
+    r"|copyrighted.{0,40}(video|music|song|audio)"
+    r"|Content ID|rights management|licensed music|copyright replacement",
+    re.IGNORECASE,
+)
+
+AI_TEAM_TOOL_PATTERN = re.compile(
+    r"AI.{0,30}(团队|协作|協作|项目管理|项目协作|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|工作区)"
+    r"|(?:团队|协作|協作|项目管理|项目协作|任务管理|企业管理|企业工作台|企业协作|知识管理|协作文档|白板|无限画布|画布|工作区).{0,30}AI"
+    r"|AI.{0,30}(team|collaboration|collaborative|workspace|project management|task management|whiteboard|infinite canvas|canvas|enterprise management|knowledge management)"
+    r"|(?:team|collaboration|collaborative|workspace|project management|task management|whiteboard|infinite canvas|canvas|enterprise management|knowledge management).{0,30}AI",
     re.IGNORECASE,
 )
 
@@ -4512,6 +4582,39 @@ def frontier_innovation_gate(item):
     return False
 
 
+def is_ai_copyright_item(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not AI_COPYRIGHT_PATTERN.search(text):
+        return False
+    ai_hit = bool(AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|人工智能|生成式|generative\s*AI", text, re.IGNORECASE))
+    if not ai_hit:
+        return False
+    # 偏向平台功能、内容创作、音乐授权处理；单纯诉讼/争议仍交给通用过滤器。
+    return bool(re.search(
+        r"音乐|音樂|音频|音頻|视频|影片|創作|创作|生成|替换|替換|授权|授權|版权处理|版權處理|版权音乐|版權音樂|Content ID|YouTube|rights management|licensed music|copyright replacement",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def is_ai_team_management_tool_item(item):
+    text = build_item_filter_text(item, include_query=True)
+    if not AI_TEAM_TOOL_PATTERN.search(text):
+        return False
+    if re.search(r"without\s+AI|no\s+AI|non[-\s]?AI|不含AI|没有AI|無AI|沒有AI|非AI", text, re.IGNORECASE):
+        return False
+    if not (AI_CORE_PATTERN.search(text) or re.search(r"\bAI\b|人工智能|生成式|大模型", text, re.IGNORECASE)):
+        return False
+    if is_business_finance_noise(item) or is_security_or_hype_noise(item):
+        return False
+    return bool(re.search(
+        r"团队|协作|協作|项目|任务|企业|工作台|工作区|知识库|知识管理|文档|白板|无限画布|画布"
+        r"|team|collaboration|collaborative|project|task|workspace|whiteboard|canvas|knowledge",
+        text,
+        re.IGNORECASE,
+    ))
+
+
 def practical_keyword_gate(item):
     """
     实用导向硬门槛：
@@ -4525,7 +4628,9 @@ def practical_keyword_gate(item):
 
     if is_high_value_practical_example(item) and not is_audio_promo_or_training_ad(item):
         return True
-    if EXCLUDE_PATTERN.search(support_text):
+    copyright_hit = is_ai_copyright_item(item)
+    team_tool_hit = is_ai_team_management_tool_item(item)
+    if EXCLUDE_PATTERN.search(support_text) and not (copyright_hit or team_tool_hit):
         return False
     if is_non_actionable_page(item):
         return False
@@ -4535,6 +4640,10 @@ def practical_keyword_gate(item):
         return False
     if not AI_CORE_PATTERN.search(core_text):
         return False
+    if copyright_hit:
+        return True
+    if team_tool_hit:
+        return True
     if not PRACTICE_REQUIRED_PATTERN.search(support_text):
         return False
     return True
@@ -6594,6 +6703,10 @@ def practical_relevance_score(item):
         score += 2
     if is_high_value_practical_example(item):
         score += 8
+    if is_ai_copyright_item(item):
+        score += 6
+    if is_ai_team_management_tool_item(item):
+        score += 6
 
     if LOW_VALUE_SIGNAL.search(text):
         score -= 3
@@ -6675,11 +6788,13 @@ def pool_bucket(item):
     reliable_source = item.get("source") in SOURCE_REGISTRY
     practical_hit = is_practical_candidate(item)
     frontier_hit = frontier_innovation_gate(item)
+    copyright_hit = is_ai_copyright_item(item)
+    team_tool_hit = is_ai_team_management_tool_item(item)
     practice_required_hit = bool(PRACTICE_REQUIRED_PATTERN.search(build_item_filter_text(item, include_query=True)))
     ordinary_hit = bool(ORDINARY_HINT_PATTERN.search(build_item_filter_text(item, include_query=True)))
     is_priority_wechat = bool(item.get("is_priority_wechat"))
 
-    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit):
+    if date_ok and reliable_source and (practical_hit or frontier_hit or audio_editorial_hit or copyright_hit or team_tool_hit) and (practice_required_hit or practical_score >= max(PRACTICAL_MIN_SCORE, 2) or audio_editorial_hit or copyright_hit or team_tool_hit):
         return "A"
     if date_ok and reliable_source and is_priority_wechat and not is_non_actionable_page(item) and not is_non_practical_news(item):
         if AI_CORE_PATTERN.search(build_item_filter_text(item, include_query=True)):
@@ -6720,6 +6835,10 @@ def is_practical_candidate(item):
         return False
     if not ai_core_hit:
         return False
+    if is_ai_copyright_item(item):
+        return True
+    if is_ai_team_management_tool_item(item):
+        return True
     if is_priority_wechat and (practice_required_hit or experience_hit or app_hit or model_hit or audio_relevance_score(item) >= 2):
         return True
     if frontier_innovation_gate(item):
@@ -6948,6 +7067,10 @@ def calculate_heat_score(item):
         heat += 18
     if re.search(r"音频|播客|podcast|voice|配音|ASR|TTS|DAW|VST|MIDI|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", text, re.IGNORECASE):
         heat += 22
+    if is_ai_copyright_item(item):
+        heat += 48
+    if is_ai_team_management_tool_item(item):
+        heat += 44
     if is_high_value_audio_example(item):
         heat += 80
     if is_high_value_practical_example(item):
@@ -7274,6 +7397,100 @@ def enforce_diversity_with_pool(items):
 # Ollama 生成中文标题与摘要（v3.0 重构）
 # ══════════════════════════════════════════════════════════════════════════════
 
+_SUMMARY_CACHE = None
+_LINK_CHECK_CACHE = None
+_LINK_CHECK_CACHE_LOCK = threading.Lock()
+
+
+def _load_json_cache(path):
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_json_cache(path, data):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"      [WARN] 缓存写入失败: {path} ({exc})")
+
+
+def _stable_hash(text):
+    return hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _summary_cache_key(item):
+    url = canonicalize_url_for_history(item.get("url", "")) or str(item.get("url", "") or "").rstrip("/")
+    material = "|".join([
+        SUMMARY_CACHE_VERSION,
+        OLLAMA_MODEL,
+        url,
+        str(item.get("source", "") or ""),
+        str(item.get("title", "") or ""),
+        str(item.get("summary", "") or ""),
+    ])
+    return _stable_hash(material)
+
+
+def _load_summary_cache():
+    global _SUMMARY_CACHE
+    if _SUMMARY_CACHE is None:
+        _SUMMARY_CACHE = _load_json_cache(SUMMARY_CACHE_FILE)
+    return _SUMMARY_CACHE
+
+
+def _apply_summary_cache(item, index, total):
+    key = _summary_cache_key(item)
+    entry = _load_summary_cache().get(key)
+    if not isinstance(entry, dict):
+        return key, False
+    if entry.get("remove"):
+        item["_remove"] = True
+        print(f"      [{index}/{total}] ⚡ 摘要缓存命中：已过滤 {item.get('title', '')[:40]}")
+        return key, True
+    for field in ("title_zh", "summary_zh", "emoji_override", "category"):
+        if field in entry:
+            item[field] = entry[field]
+    if item.get("title_zh") and item.get("summary_zh"):
+        print(f"      [{index}/{total}] ⚡ 摘要缓存命中: {item['title_zh'][:40]}")
+        return key, True
+    return key, False
+
+
+def _store_summary_cache(item, key):
+    if not key or item.get("_summary_generation_failed"):
+        return
+    cache = _load_summary_cache()
+    cache[key] = {
+        "saved_at": time.time(),
+        "url": canonicalize_url_for_history(item.get("url", "")) or item.get("url", ""),
+        "title": item.get("title", ""),
+        "remove": bool(item.get("_remove")),
+        "title_zh": item.get("title_zh", ""),
+        "summary_zh": item.get("summary_zh", ""),
+        "emoji_override": item.get("emoji_override", ""),
+        "category": item.get("category", "AI"),
+    }
+    if len(cache) > SUMMARY_CACHE_MAX_ITEMS:
+        keep = sorted(
+            cache.items(),
+            key=lambda pair: float(pair[1].get("saved_at", 0) or 0),
+            reverse=True,
+        )[:SUMMARY_CACHE_MAX_ITEMS]
+        cache.clear()
+        cache.update(dict(keep))
+
+
+def _flush_summary_cache():
+    if _SUMMARY_CACHE is not None:
+        _save_json_cache(SUMMARY_CACHE_FILE, _SUMMARY_CACHE)
+
+
 def _generate_single_summary(item, index, total):
     src_info = get_source_info(item["source"])
     src_tag = "国内" if src_info["type"] == "domestic" else "国际"
@@ -7453,24 +7670,33 @@ URL: {item['url']}"""
             print(f"      [{index}/{total}] ⚠️ JSON解析失败，使用原文: {item['title'][:40]}")
             item["title_zh"] = item["title"]
             item["summary_zh"] = item["summary"]
+            item["_summary_generation_failed"] = True
     except Exception as e:
         print(f"      [{index}/{total}] ❌ Ollama调用失败: {e}")
         item["title_zh"] = item["title"]
         item["summary_zh"] = item["summary"]
+        item["_summary_generation_failed"] = True
 
 def generate_chinese_summaries(items):
     total = len(items)
     print(f"      逐条调用 Ollama ({OLLAMA_MODEL})，共 {total} 条...")
-    print(f"      [v3.3] 已启用文章正文/视频字幕抓取 + 实用导向 + 反幻觉校验")
+    print(f"      [v4.6] 已启用文章正文/视频字幕抓取 + 摘要缓存 + 实用导向 + 反幻觉校验")
 
+    cache_hits = 0
     for i, item in enumerate(items, 1):
+        cache_key, cached = _apply_summary_cache(item, i, total)
+        if cached:
+            cache_hits += 1
+            continue
         _generate_single_summary(item, i, total)
+        _store_summary_cache(item, cache_key)
         if i < total:
             time.sleep(0.5)
+    _flush_summary_cache()
 
     filtered_count = sum(1 for it in items if it.get("_remove"))
     items = [it for it in items if not it.get("_remove")]
-    print(f"      完成: {total} 条已处理, {filtered_count} 条被过滤为非AI相关")
+    print(f"      完成: {total} 条已处理, 摘要缓存命中 {cache_hits} 条, {filtered_count} 条被过滤为非AI相关")
 
     for item in items:
         if "title_zh" not in item:
@@ -7493,6 +7719,10 @@ TAG_RULES = [
      "实用", "tag-product", "\U0001f6e0\ufe0f"),
     (re.compile(r"音频|播客|podcast|voice|配音|asr|tts|daw|vst|midi|混音|母带|转写|音乐|旋律|和声|和弦|音效|音符|编曲|效果器|reaper|wwise|criware|logic|cubase", re.I),
      "音频AI", "tag-product", "\U0001f3a7"),
+    (re.compile(r"AI版权|AI著作权|AI版權|AI著作權|版权处理|版權處理|版权替换|版權替換|版权音乐|版權音樂|音乐授权|音樂授權|Content ID|copyright|licensed music|rights management", re.I),
+     "AI版权", "tag-policy", "\U0001f4dc"),
+    (re.compile(r"AI团队|AI协作|AI企业管理|AI项目管理|AI任务管理|AI无限画布|AI画布|AI白板|AI工作区|team collaboration|project management|whiteboard|infinite canvas|AI canvas|AI workspace", re.I),
+     "团队工具", "tag-product", "\U0001f5c2\ufe0f"),
     (re.compile(r"fund|rais|invest|ipo|valuat|\$\d|billion|million|serie|融资|估值|上市", re.I),
      "融资", "tag-biz", "\U0001f4b0"),
     (re.compile(r"open.?source|hugging|apache|mit.license|开源", re.I),
@@ -8209,6 +8439,47 @@ def select_audio_section_items(items, limit=None):
     return select_audio_review_candidates(items, limit=limit)
 
 
+def _link_check_cache_key(url):
+    return _stable_hash(canonicalize_url_for_history(url) or str(url or "").rstrip("/"))
+
+
+def _load_link_check_cache():
+    global _LINK_CHECK_CACHE
+    with _LINK_CHECK_CACHE_LOCK:
+        if _LINK_CHECK_CACHE is None:
+            _LINK_CHECK_CACHE = _load_json_cache(LINK_CHECK_CACHE_FILE)
+    return _LINK_CHECK_CACHE
+
+
+def _get_cached_link_check(url):
+    cache = _load_link_check_cache()
+    with _LINK_CHECK_CACHE_LOCK:
+        entry = cache.get(_link_check_cache_key(url))
+    if not isinstance(entry, dict):
+        return None
+    checked_at = float(entry.get("checked_at", 0) or 0)
+    if time.time() - checked_at > LINK_CHECK_CACHE_TTL_HOURS * 3600:
+        return None
+    if "accessible" in entry:
+        return bool(entry.get("accessible"))
+    return None
+
+
+def _store_link_check(url, accessible):
+    cache = _load_link_check_cache()
+    with _LINK_CHECK_CACHE_LOCK:
+        cache[_link_check_cache_key(url)] = {
+            "checked_at": time.time(),
+            "url": canonicalize_url_for_history(url) or str(url or "").rstrip("/"),
+            "accessible": bool(accessible),
+        }
+
+
+def _flush_link_check_cache():
+    if _LINK_CHECK_CACHE is not None:
+        _save_json_cache(LINK_CHECK_CACHE_FILE, _LINK_CHECK_CACHE)
+
+
 def is_item_link_accessible(item):
     url = str(item.get("url", "") or "").strip()
     if not url:
@@ -8217,6 +8488,9 @@ def is_item_link_accessible(item):
         return False
     if "mp.weixin.qq.com/" not in url:
         return True
+    cached = _get_cached_link_check(url)
+    if cached is not None:
+        return cached
     try:
         session = requests.Session()
         session.trust_env = False
@@ -8232,7 +8506,9 @@ def is_item_link_accessible(item):
             body,
             re.IGNORECASE,
         ):
+            _store_link_check(url, False)
             return False
+        _store_link_check(url, True)
         return True
     except Exception:
         # 微信文章很容易因为反爬、代理或本机网络被误判；审核前只拦截明确删除/不可见的页面。
@@ -8240,15 +8516,31 @@ def is_item_link_accessible(item):
 
 
 def filter_inaccessible_items(items):
-    kept = []
-    filtered_count = 0
-    for item in items:
-        if not is_item_link_accessible(item):
-            filtered_count += 1
-            continue
-        kept.append(item)
+    if not items:
+        return []
+    results = [True] * len(items)
+    workers = min(LINK_CHECK_MAX_WORKERS, max(1, len(items)))
+    if workers == 1 or len(items) <= 2:
+        for idx, item in enumerate(items):
+            results[idx] = is_item_link_accessible(item)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {
+                executor.submit(is_item_link_accessible, item): idx
+                for idx, item in enumerate(items)
+            }
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    results[idx] = bool(future.result())
+                except Exception:
+                    results[idx] = True
+    _flush_link_check_cache()
+    kept = [item for item, ok in zip(items, results) if ok]
+    filtered_count = len(items) - len(kept)
     if filtered_count:
         print(f"      [v3.7] 明确不可访问链接过滤: {filtered_count} 条")
+    print(f"      [v4.6] 链接检查完成: {len(items)} 条, 并发 {workers}, 缓存TTL {LINK_CHECK_CACHE_TTL_HOURS:g}h")
     return kept
 
 
@@ -8300,6 +8592,7 @@ def build_review_feedback_records(all_review_items, selected_items):
             "selected_rank": selected_rank_map.get(url, 0),
             "source": item.get("source", ""),
             "category": item.get("category", ""),
+            "review_section": item.get("_review_section", ""),
             "domain": domain,
             "account_name": item.get("account_name", ""),
             "pool": item.get("_pool", ""),
@@ -8498,25 +8791,58 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         },
     }
 
-def push_feishu_to_webhooks(payload, webhooks, label_prefix):
-    success_count = 0
-    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
-    for i, webhook in enumerate(valid_webhooks, 1):
+def _post_feishu_webhook_hard_timeout(webhook, payload):
+    result_queue = queue.Queue(maxsize=1)
+
+    def worker():
         try:
             resp = requests.post(
                 webhook.strip(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=15,
+                timeout=(FEISHU_CONNECT_TIMEOUT, FEISHU_READ_TIMEOUT),
             )
-            result = resp.json()
+            try:
+                body = resp.json()
+            except Exception:
+                body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
+            result_queue.put(("ok", body))
+        except Exception as exc:
+            result_queue.put(("error", repr(exc)))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(FEISHU_HARD_TIMEOUT)
+    if thread.is_alive():
+        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+    try:
+        status, result = result_queue.get_nowait()
+    except queue.Empty:
+        return False, {"error": "empty_response"}
+    if status == "error":
+        return False, {"error": result}
+    return True, result
+
+
+def push_feishu_to_webhooks(payload, webhooks, label_prefix):
+    success_count = 0
+    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    print(
+        f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
+        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
+    )
+    for i, webhook in enumerate(valid_webhooks, 1):
+        for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
+            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
+            ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
+            if not ok:
+                print(f"[ERROR] Feishu push failed -> {label_prefix}{i} attempt {attempt}: {result}")
+                continue
             if result.get("StatusCode") == 0 or result.get("code") == 0:
                 print(f"[OK] Feishu push succeeded ✅ -> {label_prefix}{i}")
                 success_count += 1
-            else:
-                print(f"[WARN] Feishu response -> {label_prefix}{i}: {result}")
-        except Exception as e:
-            print(f"[ERROR] Feishu push failed -> {label_prefix}{i}: {e}")
+                break
+            print(f"[WARN] Feishu response -> {label_prefix}{i} attempt {attempt}: {result}")
     return success_count > 0
 
 
@@ -8640,8 +8966,8 @@ def _save_positive_sample_library(samples):
 def _subscribe_learned_accounts(account_names):
     account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
     if not account_names:
-        return {"added": 0, "existing": 0, "failed": 0}
-    stats = {"added": 0, "existing": 0, "failed": 0}
+        return {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
+    stats = {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     for base in WERSS_BASES:
         token = _werss_login(base)
         if not token:
@@ -8657,8 +8983,10 @@ def _subscribe_learned_accounts(account_names):
                 existing[account.lower()] = {"mp_name": info}
             else:
                 stats["failed"] += 1
+                stats["failed_accounts"].append({"account": account, "reason": info})
         return stats
     stats["failed"] += len(account_names)
+    stats["failed_accounts"].extend({"account": account, "reason": "login_failed"} for account in account_names)
     return stats
 
 
@@ -8741,6 +9069,9 @@ def learn_positive_samples_only():
     print(f"\n[OK] 样例学习完成: 新学习 {len(learned)} 条, AI音频 {audio_count} 条, 失败 {len(failed)} 条")
     print(f"[OK] 正样本库: {POSITIVE_SAMPLE_LIBRARY_FILE}")
     print(f"[OK] WeRSS 订阅: 新增 {sub_stats['added']} 个, 已有 {sub_stats['existing']} 个, 失败 {sub_stats['failed']} 个")
+    if sub_stats.get("failed_accounts"):
+        details = "；".join(f"{row.get('account')}({row.get('reason')})" for row in sub_stats["failed_accounts"])
+        print(f"[INFO] WeRSS 未能订阅公众号: {details}")
     print("[INFO] 只学习模式不会生成审核页，也不会推送飞书。")
 
 
@@ -9144,8 +9475,11 @@ def main():
 
     final_by_url = {str(it.get("url", "")).rstrip("/"): it for it in final if it.get("url")}
     selected_audio_urls = {
-        url for url in final_by_url
-        if url in audio_review_urls
+        url for url, item in final_by_url.items()
+        if (
+            item.get("_review_section") == "audio"
+            or (not item.get("_review_section") and url in audio_review_urls)
+        )
     }
     selected_audio_pool = [final_by_url[url] for url in selected_audio_urls]
     if not selected_audio_pool:
