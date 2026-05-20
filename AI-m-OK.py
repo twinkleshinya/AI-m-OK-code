@@ -83,6 +83,7 @@ FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
     "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
 ])
+ALLOWED_FEISHU_WEBHOOKS = set(FEISHU_WEBHOOKS)
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     *FEISHU_WEBHOOKS,
 }
@@ -8825,7 +8826,11 @@ def _post_feishu_webhook_hard_timeout(webhook, payload):
 
 def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     success_count = 0
-    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    requested_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    blocked_webhooks = [hook for hook in requested_webhooks if hook not in ALLOWED_FEISHU_WEBHOOKS]
+    if blocked_webhooks:
+        print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
+    valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
     print(
         f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
         f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
@@ -8845,7 +8850,10 @@ def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     return success_count > 0
 
 
-def push_feishu(payload):
+def push_feishu(payload, review_approved=False):
+    if not review_approved:
+        print("[SECURITY] 未检测到网页审核通过标记，已阻止飞书推送。")
+        return False
     return push_feishu_to_webhooks(payload, FEISHU_WEBHOOKS, "群")
 
 
@@ -9502,7 +9510,7 @@ def main():
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
     card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
-    feishu_ok = push_feishu(card)
+    feishu_ok = push_feishu(card, review_approved=True)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
     # ── 只有飞书真正推送成功后，才保存历史；审核阶段不算推送 ──
