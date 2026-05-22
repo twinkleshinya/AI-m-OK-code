@@ -155,6 +155,7 @@ REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
 REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
 REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
 POSITIVE_SAMPLE_REVIEW_DAYS = int(os.environ.get("POSITIVE_SAMPLE_REVIEW_DAYS", "3"))
+POSITIVE_SAMPLE_INJECT_MAX = int(os.environ.get("POSITIVE_SAMPLE_INJECT_MAX", "200"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 PUSH_ARCHIVE_MAX_ITEMS = int(os.environ.get("PUSH_ARCHIVE_MAX_ITEMS", "1500"))
@@ -3143,10 +3144,18 @@ def _positive_sample_to_item(row):
     return item
 
 
-def fetch_positive_sample_items(max_items=80):
+def fetch_positive_sample_items(max_items=None):
+    max_items = POSITIVE_SAMPLE_INJECT_MAX if max_items is None else max_items
     items = []
     seen = set()
-    for row in load_positive_samples():
+    rows = [row for row in load_positive_samples() if isinstance(row, dict)]
+
+    def row_sort_key(row):
+        dt = parse_date_to_beijing(row.get("learned_at") or row.get("date") or "")
+        ts = dt.timestamp() if dt else 0
+        return (ts, 1 if row.get("is_audio") else 0)
+
+    for row in sorted(rows, key=row_sort_key, reverse=True):
         item = _positive_sample_to_item(row)
         if not item:
             continue
@@ -3159,7 +3168,7 @@ def fetch_positive_sample_items(max_items=80):
             break
     if items:
         audio_count = sum(1 for it in items if it.get("is_audio") or is_audio_special_item(it))
-        print(f"      [B.5] 正样本学习库注入: {len(items)} 条, AI音频 {audio_count} 条")
+        print(f"      [B.5] 正样本学习库注入: {len(items)} 条, AI音频 {audio_count} 条, 按学习时间优先")
     return items
 
 
