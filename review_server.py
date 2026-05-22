@@ -666,7 +666,8 @@ def start_review_server(
                 body = b'{"ok": true}'
                 self._send_headers(200, "application/json", len(body))
                 self.wfile.write(body)
-                threading.Thread(target=self._shutdown_server, daemon=True).start()
+                if review_result.completed.is_set():
+                    threading.Thread(target=self._shutdown_server, daemon=True).start()
                 return
             if self.path == "/cancel":
                 body = b'{"ok": true}'

@@ -41,6 +41,8 @@ try:
 except Exception:
     start_review_server = None
 
+SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+
 # Windows GBK 控制台下避免 emoji 输出导致崩溃
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -112,7 +114,7 @@ PAGES_DIR = Path(
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
-STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
+STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(SCRIPT_DIR / ".aim_ok_state")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
 SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
@@ -121,7 +123,6 @@ SUMMARY_CACHE_MAX_ITEMS = int(os.environ.get("SUMMARY_CACHE_MAX_ITEMS", "2500"))
 LINK_CHECK_CACHE_FILE = Path(os.environ.get("LINK_CHECK_CACHE_FILE", str(STATE_DIR / "link_check_cache.json")))
 LINK_CHECK_CACHE_TTL_HOURS = float(os.environ.get("LINK_CHECK_CACHE_TTL_HOURS", "72"))
 LINK_CHECK_MAX_WORKERS = max(1, int(os.environ.get("LINK_CHECK_MAX_WORKERS", "8")))
-SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
 POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
 POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
 POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(PAGES_DIR / "positive_samples.json")))
