@@ -8886,6 +8886,9 @@ def parse_wechat_sample_page(url):
         r"var\s+msg_title\s*=\s*'([^']*)'",
         r'var\s+msg_title\s*=\s*"([^"]*)"',
     ])
+    wechat_error = first_match([
+        r'<div\s+class="weui-msg__title[^"]*"[^>]*>\s*(.*?)\s*</div>',
+    ])
     summary = first_match([
         r"desc:\s*JsDecode\('([^']*)'\)",
         r'<meta\s+name="description"\s+content="(.*?)"',
@@ -8913,6 +8916,9 @@ def parse_wechat_sample_page(url):
         "source_type": "domestic",
         "learned_at": _now_iso(),
     }
+    if not title and wechat_error:
+        item["_parse_error"] = f"微信页面返回：{wechat_error}"
+        item["_fatal_parse_error"] = bool(re.search(r"参数错误|链接错误|不存在|已删除|无法查看", wechat_error))
     item["is_audio"] = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item))
     item["is_practical"] = bool(is_practical_candidate(item) or practical_keyword_gate(item))
     item["terms"] = _extract_feedback_terms(item)
@@ -9048,8 +9054,12 @@ def learn_positive_samples_only():
             print(f"    [WARN] 解析失败: {e}")
             row = None
         if not row or not row.get("title"):
-            print("    [WARN] 未能解析标题，保留在待学习文件中。")
-            failed.append(url)
+            parse_error = (row or {}).get("_parse_error") or "未能解析标题"
+            if (row or {}).get("_fatal_parse_error"):
+                print(f"    [WARN] {parse_error}，该链接不是有效文章页，已从待学习文件移除。")
+            else:
+                print(f"    [WARN] {parse_error}，保留在待学习文件中。")
+                failed.append(url)
             continue
         override_label = url_overrides.get(url, "")
         if override_label:
