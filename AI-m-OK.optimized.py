@@ -41,6 +41,8 @@ try:
 except Exception:
     start_review_server = None
 
+SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+
 # Windows GBK 控制台下避免 emoji 输出导致崩溃
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -82,8 +84,8 @@ def _unique_webhooks(webhooks):
 FEISHU_WEBHOOKS = _unique_webhooks([
     "https://open.feishu.cn/open-apis/bot/v2/hook/30bd0594-8318-4475-9f34-e0ed5a65de00",
     "https://open.feishu.cn/open-apis/bot/v2/hook/117cc76c-4497-4526-a66a-7485082523cb",
-    "https://open.feishu.cn/open-apis/bot/v2/hook/c16acbb8-5615-451e-9465-8321f70e8646",
-] + _split_webhooks(os.environ.get("FEISHU_WEBHOOKS", "")))
+])
+ALLOWED_FEISHU_WEBHOOKS = set(FEISHU_WEBHOOKS)
 REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
     *FEISHU_WEBHOOKS,
 }
@@ -112,7 +114,7 @@ PAGES_DIR = Path(
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
-STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(Path.home() / ".aim_ok")))
+STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(SCRIPT_DIR / ".aim_ok_state")))
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
 SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
@@ -121,7 +123,6 @@ SUMMARY_CACHE_MAX_ITEMS = int(os.environ.get("SUMMARY_CACHE_MAX_ITEMS", "2500"))
 LINK_CHECK_CACHE_FILE = Path(os.environ.get("LINK_CHECK_CACHE_FILE", str(STATE_DIR / "link_check_cache.json")))
 LINK_CHECK_CACHE_TTL_HOURS = float(os.environ.get("LINK_CHECK_CACHE_TTL_HOURS", "72"))
 LINK_CHECK_MAX_WORKERS = max(1, int(os.environ.get("LINK_CHECK_MAX_WORKERS", "8")))
-SCRIPT_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
 POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
 POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
 POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(PAGES_DIR / "positive_samples.json")))
@@ -155,6 +156,7 @@ REVIEW_CANDIDATE_MAX = int(os.environ.get("REVIEW_CANDIDATE_MAX", "30"))
 REVIEW_MAX_PER_SOURCE = int(os.environ.get("REVIEW_MAX_PER_SOURCE", "8"))
 REVIEW_WECHAT_MAX = int(os.environ.get("REVIEW_WECHAT_MAX", "12"))
 POSITIVE_SAMPLE_REVIEW_DAYS = int(os.environ.get("POSITIVE_SAMPLE_REVIEW_DAYS", "3"))
+POSITIVE_SAMPLE_INJECT_MAX = int(os.environ.get("POSITIVE_SAMPLE_INJECT_MAX", "200"))
 FEISHU_MAX_PER_SOURCE = int(os.environ.get("FEISHU_MAX_PER_SOURCE", "4"))
 FEISHU_WECHAT_MAX = int(os.environ.get("FEISHU_WECHAT_MAX", "5"))
 PUSH_ARCHIVE_MAX_ITEMS = int(os.environ.get("PUSH_ARCHIVE_MAX_ITEMS", "1500"))
@@ -3143,10 +3145,18 @@ def _positive_sample_to_item(row):
     return item
 
 
-def fetch_positive_sample_items(max_items=80):
+def fetch_positive_sample_items(max_items=None):
+    max_items = POSITIVE_SAMPLE_INJECT_MAX if max_items is None else max_items
     items = []
     seen = set()
-    for row in load_positive_samples():
+    rows = [row for row in load_positive_samples() if isinstance(row, dict)]
+
+    def row_sort_key(row):
+        dt = parse_date_to_beijing(row.get("learned_at") or row.get("date") or "")
+        ts = dt.timestamp() if dt else 0
+        return (ts, 1 if row.get("is_audio") else 0)
+
+    for row in sorted(rows, key=row_sort_key, reverse=True):
         item = _positive_sample_to_item(row)
         if not item:
             continue
@@ -3159,7 +3169,7 @@ def fetch_positive_sample_items(max_items=80):
             break
     if items:
         audio_count = sum(1 for it in items if it.get("is_audio") or is_audio_special_item(it))
-        print(f"      [B.5] 正样本学习库注入: {len(items)} 条, AI音频 {audio_count} 条")
+        print(f"      [B.5] 正样本学习库注入: {len(items)} 条, AI音频 {audio_count} 条, 按学习时间优先")
     return items
 
 
@@ -8753,11 +8763,10 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
 
     elements.append({"tag": "hr"})
 
-    if total_count > feishu_count:
-        elements.append({
-            "tag": "markdown",
-            "content": f"<font color='grey'> 🥕 以上为今日热度最高的 {feishu_count} 条精选，完整 {total_count} 条资讯请查看网页版 👇</font>",
-        })
+    elements.append({
+        "tag": "markdown",
+        "content": "<font color='grey'> 🥕 可点击查看网页版 👇</font>",
+    })
 
     elements.append({
         "tag": "action",
@@ -8773,7 +8782,7 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         "tag": "note",
         "elements": [{
             "tag": "plain_text",
-            "content": f"由 AI'm OK 自动生成 | {date_str} | {source_count}源聚合 | 飞书精选Top{feishu_count} | 音频专项{len(audio_items)}",
+            "content": f"由 AI'm OK 自动生成 | {date_str}",
         }],
     })
 
@@ -8826,7 +8835,11 @@ def _post_feishu_webhook_hard_timeout(webhook, payload):
 
 def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     success_count = 0
-    valid_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    requested_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    blocked_webhooks = [hook for hook in requested_webhooks if hook not in ALLOWED_FEISHU_WEBHOOKS]
+    if blocked_webhooks:
+        print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
+    valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
     print(
         f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
         f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
@@ -8846,7 +8859,10 @@ def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     return success_count > 0
 
 
-def push_feishu(payload):
+def push_feishu(payload, review_approved=False):
+    if not review_approved:
+        print("[SECURITY] 未检测到网页审核通过标记，已阻止飞书推送。")
+        return False
     return push_feishu_to_webhooks(payload, FEISHU_WEBHOOKS, "群")
 
 
@@ -8880,6 +8896,9 @@ def parse_wechat_sample_page(url):
         r"var\s+msg_title\s*=\s*'([^']*)'",
         r'var\s+msg_title\s*=\s*"([^"]*)"',
     ])
+    wechat_error = first_match([
+        r'<div\s+class="weui-msg__title[^"]*"[^>]*>\s*(.*?)\s*</div>',
+    ])
     summary = first_match([
         r"desc:\s*JsDecode\('([^']*)'\)",
         r'<meta\s+name="description"\s+content="(.*?)"',
@@ -8907,6 +8926,9 @@ def parse_wechat_sample_page(url):
         "source_type": "domestic",
         "learned_at": _now_iso(),
     }
+    if not title and wechat_error:
+        item["_parse_error"] = f"微信页面返回：{wechat_error}"
+        item["_fatal_parse_error"] = bool(re.search(r"参数错误|链接错误|不存在|已删除|无法查看", wechat_error))
     item["is_audio"] = bool(is_audio_special_item(item) or is_visible_ai_audio_candidate(item))
     item["is_practical"] = bool(is_practical_candidate(item) or practical_keyword_gate(item))
     item["terms"] = _extract_feedback_terms(item)
@@ -9042,8 +9064,12 @@ def learn_positive_samples_only():
             print(f"    [WARN] 解析失败: {e}")
             row = None
         if not row or not row.get("title"):
-            print("    [WARN] 未能解析标题，保留在待学习文件中。")
-            failed.append(url)
+            parse_error = (row or {}).get("_parse_error") or "未能解析标题"
+            if (row or {}).get("_fatal_parse_error"):
+                print(f"    [WARN] {parse_error}，该链接不是有效文章页，已从待学习文件移除。")
+            else:
+                print(f"    [WARN] {parse_error}，保留在待学习文件中。")
+                failed.append(url)
             continue
         override_label = url_overrides.get(url, "")
         if override_label:
@@ -9503,7 +9529,7 @@ def main():
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
     card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
-    feishu_ok = push_feishu(card)
+    feishu_ok = push_feishu(card, review_approved=True)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
     # ── 只有飞书真正推送成功后，才保存历史；审核阶段不算推送 ──
