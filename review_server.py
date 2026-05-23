@@ -633,6 +633,11 @@ def start_review_server(
     on_ready=None,
 ):
     review_result = ReviewResult()
+    audio_item_url_set = {
+        str(u or "").rstrip("/")
+        for u in (audio_item_urls or set())
+        if str(u or "").strip()
+    }
     page_html = _build_review_page(
         items,
         infer_tags_func,
@@ -776,6 +781,13 @@ def start_review_server(
         item["_review_feedback_labels"] = row.get("labels", [])
         section = str(row.get("section", "") or "").strip()
         if section:
+            url = str(item.get("url", "") or "").rstrip("/")
+            original_section = (
+                "audio"
+                if url and url in audio_item_url_set
+                else ("domestic" if item.get("source_type") == "domestic" else "intl")
+            )
+            item["_manual_review_section_changed"] = section != original_section
             item["_review_section"] = section
             if section == "audio":
                 item["category"] = "AI音频"

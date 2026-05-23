@@ -8641,6 +8641,31 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         wechat_max=FEISHU_WECHAT_MAX,
         preserve_order=True,
     )
+    feishu_item_urls = {
+        str(it.get("url", "") or "").rstrip("/")
+        for it in feishu_items
+        if it.get("url")
+    }
+    manual_section_items = [
+        it for it in ranked_feishu_items
+        if it.get("_manual_review_section_changed")
+        and it.get("_review_section") in {"intl", "domestic"}
+        and str(it.get("url", "") or "").rstrip("/") not in feishu_item_urls
+    ]
+    if manual_section_items:
+        for item in manual_section_items:
+            url = str(item.get("url", "") or "").rstrip("/")
+            if not url or url in feishu_item_urls:
+                continue
+            feishu_items.append(item)
+            feishu_item_urls.add(url)
+        feishu_items.sort(
+            key=lambda x: (
+                int(x.get("_review_rank", 10**6)),
+                -float(x.get("heat_score", 0) or 0),
+            )
+        )
+        print(f"      [v4.8] 手动改为国际/国内的条目已强制保留飞书: {len(manual_section_items)} 条")
     print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
     canonical_audio_urls = {
         str(u or "").rstrip("/")
