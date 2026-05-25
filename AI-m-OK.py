@@ -25,7 +25,8 @@ import subprocess
 import threading
 import time
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from html import escape, unescape
@@ -92,10 +93,11 @@ REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
 }
 REVIEW_NOTIFY_WEBHOOKS = []
 
-FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "5"))
-FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "15"))
-FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "25"))
+FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "4"))
+FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "8"))
+FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "12"))
 FEISHU_PUSH_RETRIES = max(1, int(os.environ.get("FEISHU_PUSH_RETRIES", "2")))
+FEISHU_TOTAL_TIMEOUT = float(os.environ.get("FEISHU_TOTAL_TIMEOUT", "35"))
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -8969,37 +8971,126 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         },
     }
 
+def _feishu_no_proxy_env():
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    return env
+
+
 def _post_feishu_webhook_hard_timeout(webhook, payload):
-    result_queue = queue.Queue(maxsize=1)
+    """
+    飞书 webhook 必须“真硬超时”：请求放进独立 python 子进程。
+    subprocess.run(timeout=...) 到点会杀掉子进程，避免 requests/代理/网络栈拖住主流程。
+    """
+    tmp_path = ""
+    worker_code = r"""
+import json
+import sys
+import requests
 
-    def worker():
-        try:
-            resp = requests.post(
-                webhook.strip(),
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=(FEISHU_CONNECT_TIMEOUT, FEISHU_READ_TIMEOUT),
-            )
-            try:
-                body = resp.json()
-            except Exception:
-                body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
-            result_queue.put(("ok", body))
-        except Exception as exc:
-            result_queue.put(("error", repr(exc)))
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    thread.join(FEISHU_HARD_TIMEOUT)
-    if thread.is_alive():
-        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+webhook = sys.argv[1]
+payload_path = sys.argv[2]
+connect_timeout = float(sys.argv[3])
+read_timeout = float(sys.argv[4])
+with open(payload_path, "r", encoding="utf-8") as f:
+    payload = json.load(f)
+try:
+    with requests.Session() as session:
+        session.trust_env = False
+        resp = session.post(
+            webhook,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=(connect_timeout, read_timeout),
+        )
     try:
-        status, result = result_queue.get_nowait()
-    except queue.Empty:
-        return False, {"error": "empty_response"}
-    if status == "error":
-        return False, {"error": result}
-    return True, result
+        body = resp.json()
+    except Exception:
+        body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
+    print(json.dumps({"status": "ok", "result": body}, ensure_ascii=False))
+except Exception as exc:
+    print(json.dumps({"status": "error", "result": repr(exc)}, ensure_ascii=False))
+    sys.exit(2)
+"""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            suffix=".feishu.json",
+            prefix="aimok-",
+            dir=str(STATE_DIR),
+            delete=False,
+        ) as f:
+            json.dump(payload, f, ensure_ascii=False)
+            tmp_path = f.name
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                worker_code,
+                webhook.strip(),
+                tmp_path,
+                str(FEISHU_CONNECT_TIMEOUT),
+                str(FEISHU_READ_TIMEOUT),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=FEISHU_HARD_TIMEOUT,
+            env=_feishu_no_proxy_env(),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired:
+        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+    except Exception as exc:
+        return False, {"error": repr(exc)}
+    finally:
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if not stdout:
+        return False, {
+            "error": "empty_response",
+            "exitcode": proc.returncode,
+            "stderr": stderr[:500],
+        }
+    try:
+        data = json.loads(stdout.splitlines()[-1])
+    except Exception:
+        return False, {
+            "error": "bad_worker_response",
+            "exitcode": proc.returncode,
+            "stdout": stdout[:500],
+            "stderr": stderr[:500],
+        }
+    if data.get("status") == "error":
+        return False, {"error": data.get("result"), "exitcode": proc.returncode}
+    return True, data.get("result") or {}
+
+
+def _push_single_feishu_webhook(webhook, payload, label, total):
+    last_result = None
+    for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
+        print(f"      Feishu push -> {label}/{total} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
+        ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
+        last_result = result
+        if not ok:
+            print(f"[ERROR] Feishu push failed -> {label} attempt {attempt}: {result}")
+            continue
+        if result.get("StatusCode") == 0 or result.get("code") == 0:
+            print(f"[OK] Feishu push succeeded ✅ -> {label}")
+            return True, result
+        print(f"[WARN] Feishu response -> {label} attempt {attempt}: {result}")
+    return False, last_result or {"error": "unknown"}
 
 
 def push_feishu_to_webhooks(payload, webhooks, label_prefix):
@@ -9009,22 +9100,47 @@ def push_feishu_to_webhooks(payload, webhooks, label_prefix):
     if blocked_webhooks:
         print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
     valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
+    if not valid_webhooks:
+        print("      [ERROR] 没有可用的白名单飞书机器人，本次不推送。")
+        return False
     print(
         f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
-        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
+        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, "
+        f"total={FEISHU_TOTAL_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES}, parallel=yes, proxy=off)"
     )
-    for i, webhook in enumerate(valid_webhooks, 1):
-        for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
-            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
-            ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
-            if not ok:
-                print(f"[ERROR] Feishu push failed -> {label_prefix}{i} attempt {attempt}: {result}")
-                continue
-            if result.get("StatusCode") == 0 or result.get("code") == 0:
-                print(f"[OK] Feishu push succeeded ✅ -> {label_prefix}{i}")
-                success_count += 1
+    labels = [f"{label_prefix}{i}" for i in range(1, len(valid_webhooks) + 1)]
+    executor = ThreadPoolExecutor(max_workers=min(len(valid_webhooks), 4))
+    try:
+        future_map = {
+            executor.submit(_push_single_feishu_webhook, webhook, payload, label, len(valid_webhooks)): label
+            for webhook, label in zip(valid_webhooks, labels)
+        }
+        deadline = time.monotonic() + FEISHU_TOTAL_TIMEOUT
+        pending = set(future_map)
+        while pending:
+            remaining = max(0.1, deadline - time.monotonic())
+            if time.monotonic() >= deadline:
+                for future in pending:
+                    future.cancel()
+                print(f"[ERROR] Feishu push total timeout after {FEISHU_TOTAL_TIMEOUT:g}s, 未完成 {len(pending)} 个机器人。")
                 break
-            print(f"[WARN] Feishu response -> {label_prefix}{i} attempt {attempt}: {result}")
+            done, _ = wait(pending, timeout=remaining, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                label = future_map[future]
+                try:
+                    ok, result = future.result()
+                except Exception as exc:
+                    ok, result = False, {"error": repr(exc)}
+                if ok:
+                    success_count += 1
+                else:
+                    print(f"[ERROR] Feishu push finally failed -> {label}: {result}")
+            for future in done:
+                pending.discard(future)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return success_count > 0
 
 
