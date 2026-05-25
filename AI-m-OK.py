@@ -17,6 +17,7 @@ import json
 import hashlib
 import base64
 import os
+import atexit
 import queue
 import random
 import re
@@ -38,6 +39,10 @@ import feedparser
 import requests
 
 import sys
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 try:
     from review_server import start_review_server
 except Exception:
@@ -98,6 +103,7 @@ FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "8"))
 FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "12"))
 FEISHU_PUSH_RETRIES = max(1, int(os.environ.get("FEISHU_PUSH_RETRIES", "2")))
 FEISHU_TOTAL_TIMEOUT = float(os.environ.get("FEISHU_TOTAL_TIMEOUT", "35"))
+FEISHU_TEXT_FALLBACK = os.environ.get("FEISHU_TEXT_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -137,6 +143,63 @@ SCRIPT_BACKUP_TARGETS = [
     for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
     if x.strip()
 ]
+MAIN_LOCK_FILE = STATE_DIR / "aimok-main.lock"
+_MAIN_LOCK_HANDLE = None
+
+
+def acquire_main_single_instance_lock():
+    """
+    防止定时任务、手动运行、代码库副本同时跑，导致审核页/飞书推送互相抢状态。
+    """
+    global _MAIN_LOCK_HANDLE
+    if _MAIN_LOCK_HANDLE is not None:
+        return True
+    handle = None
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        handle = open(MAIN_LOCK_FILE, "a+", encoding="utf-8")
+        handle.seek(0)
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"pid={os.getpid()} started_at={_now_iso()} cwd={Path.cwd()}\n")
+        handle.flush()
+        _MAIN_LOCK_HANDLE = handle
+        return True
+    except Exception as exc:
+        try:
+            if handle is not None:
+                handle.close()
+        except Exception:
+            pass
+        print(f"[ERROR] 检测到已有 AI'm OK 主流程正在运行，本次退出，避免重复推送/卡住。lock={MAIN_LOCK_FILE} ({exc})")
+        return False
+
+
+def release_main_single_instance_lock():
+    global _MAIN_LOCK_HANDLE
+    handle = _MAIN_LOCK_HANDLE
+    if handle is None:
+        return
+    try:
+        handle.seek(0)
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        handle.close()
+    except Exception:
+        pass
+    _MAIN_LOCK_HANDLE = None
+
+
+atexit.register(release_main_single_instance_lock)
 
 # ── 数量与多样性约束 ──
 MAX_ITEMS = 26
@@ -9093,21 +9156,31 @@ def _push_single_feishu_webhook(webhook, payload, label, total):
     return False, last_result or {"error": "unknown"}
 
 
-def push_feishu_to_webhooks(payload, webhooks, label_prefix):
+def _build_feishu_text_fallback_payload(payload):
+    title = "AI'm OK 今日 AI 资讯"
+    page_url = ""
+    try:
+        card = (payload or {}).get("card") or {}
+        title = (((card.get("header") or {}).get("title") or {}).get("content") or title).strip()
+        for element in card.get("elements") or []:
+            for action in element.get("actions") or []:
+                url = (action or {}).get("url") or ""
+                if url:
+                    page_url = url
+                    break
+            if page_url:
+                break
+    except Exception:
+        pass
+    text = f"{title}\n\n🥕 可点击查看网页版 👇"
+    if page_url:
+        text += f"\n{page_url}"
+    text += "\n\n（互动卡片发送失败，已自动改用纯文本兜底。）"
+    return {"msg_type": "text", "content": {"text": text}}
+
+
+def _push_payload_to_valid_feishu_webhooks(payload, valid_webhooks, label_prefix):
     success_count = 0
-    requested_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
-    blocked_webhooks = [hook for hook in requested_webhooks if hook not in ALLOWED_FEISHU_WEBHOOKS]
-    if blocked_webhooks:
-        print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
-    valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
-    if not valid_webhooks:
-        print("      [ERROR] 没有可用的白名单飞书机器人，本次不推送。")
-        return False
-    print(
-        f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
-        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, "
-        f"total={FEISHU_TOTAL_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES}, parallel=yes, proxy=off)"
-    )
     labels = [f"{label_prefix}{i}" for i in range(1, len(valid_webhooks) + 1)]
     executor = ThreadPoolExecutor(max_workers=min(len(valid_webhooks), 4))
     try:
@@ -9141,6 +9214,28 @@ def push_feishu_to_webhooks(payload, webhooks, label_prefix):
                 pending.discard(future)
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+    return success_count
+
+
+def push_feishu_to_webhooks(payload, webhooks, label_prefix):
+    requested_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
+    blocked_webhooks = [hook for hook in requested_webhooks if hook not in ALLOWED_FEISHU_WEBHOOKS]
+    if blocked_webhooks:
+        print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
+    valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
+    if not valid_webhooks:
+        print("      [ERROR] 没有可用的白名单飞书机器人，本次不推送。")
+        return False
+    print(
+        f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
+        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, "
+        f"total={FEISHU_TOTAL_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES}, parallel=yes, proxy=off)"
+    )
+    success_count = _push_payload_to_valid_feishu_webhooks(payload, valid_webhooks, label_prefix)
+    if success_count == 0 and FEISHU_TEXT_FALLBACK and (payload or {}).get("msg_type") != "text":
+        print("      [WARN] 飞书互动卡片未送达，尝试纯文本兜底推送。")
+        fallback_payload = _build_feishu_text_fallback_payload(payload)
+        success_count = _push_payload_to_valid_feishu_webhooks(fallback_payload, valid_webhooks, f"{label_prefix}兜底")
     return success_count > 0
 
 
@@ -9552,6 +9647,8 @@ def backup_script_to_github(date_str):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
+    if not acquire_main_single_instance_lock():
+        return
     today = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
     print(f"\n{'='*60}")
     print(f"  🥕AI'm OK v3.3 | {today}")
