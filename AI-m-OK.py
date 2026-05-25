@@ -15,6 +15,7 @@ AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 
 import json
 import hashlib
+import base64
 import os
 import queue
 import random
@@ -3798,6 +3799,35 @@ def _werss_subscribe_account(base, token, account):
     if resp is None:
         return False, "add_failed"
     return True, nickname
+
+
+def _werss_subscribe_account_direct(base, token, account, mp_id, avatar="", intro=""):
+    account = str(account or "").strip()
+    mp_id = str(mp_id or "").strip()
+    if not account:
+        return False, "missing_account"
+    if not mp_id:
+        return False, "missing_mp_id"
+    feed_id = _werss_feed_id_from_fakeid(mp_id)
+    if not feed_id:
+        return False, "invalid_mp_id"
+    payload = {
+        "mp_name": account,
+        "mp_id": mp_id,
+        "avatar": str(avatar or "").strip(),
+        "mp_intro": str(intro or "").strip()[:250],
+    }
+    resp = _werss_request_json(
+        base,
+        "/api/v1/wx/mps",
+        token=token,
+        method="POST",
+        timeout=max(12, LISTING_FETCH_TIMEOUT),
+        json_body=payload,
+    )
+    if resp is None:
+        return False, "direct_add_failed"
+    return True, account
 
 
 def _ensure_werss_ai_subscriptions(base, token):
@@ -8933,6 +8963,12 @@ def parse_wechat_sample_page(url):
         r"nick_name:\s*JsDecode\('([^']*)'\)",
         r'id="js_name"[^>]*>\s*(.*?)\s*</a>',
     ])
+    mp_id = first_match([
+        r"biz:\s*['\"]([^'\"]+)['\"]",
+        r"var\s+biz\s*=\s*'([^']+)'",
+        r'var\s+biz\s*=\s*"([^"]+)"',
+        r"[?&]__biz=([^&\"']+)",
+    ])
     author = first_match([
         r'<meta\s+name="author"\s+content="(.*?)"',
         r'id="js_author_name_text"[^>]*>\s*(.*?)\s*</span>',
@@ -8945,6 +8981,7 @@ def parse_wechat_sample_page(url):
         "title": title,
         "summary": summary,
         "account_name": account_name,
+        "mp_id": mp_id,
         "author": author,
         "date": publish_date,
         "source": WECHAT_SOURCE_NAME,
@@ -9010,9 +9047,28 @@ def _save_positive_sample_library(samples):
     _POSITIVE_SAMPLE_CACHE = samples
 
 
-def _subscribe_learned_accounts(account_names):
-    account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
-    if not account_names:
+def _subscribe_learned_accounts(samples):
+    entries = []
+    seen = set()
+    for sample in samples or []:
+        if isinstance(sample, dict):
+            account = str(sample.get("account_name", "") or "").strip()
+            mp_id = str(sample.get("mp_id", "") or sample.get("biz", "") or "").strip()
+            avatar = str(sample.get("avatar", "") or sample.get("mp_cover", "") or "").strip()
+            intro = str(sample.get("summary", "") or "").strip()
+        else:
+            account = str(sample or "").strip()
+            mp_id = ""
+            avatar = ""
+            intro = ""
+        if not account:
+            continue
+        key = (account.lower(), mp_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append({"account": account, "mp_id": mp_id, "avatar": avatar, "intro": intro})
+    if not entries:
         return {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     stats = {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     for base in WERSS_BASES:
@@ -9020,20 +9076,36 @@ def _subscribe_learned_accounts(account_names):
         if not token:
             continue
         existing = _werss_existing_subscriptions(base, token)
-        for account in account_names:
-            if account.lower() in existing:
+        for entry in entries:
+            account = entry["account"]
+            mp_id = entry.get("mp_id", "")
+            feed_id = _werss_feed_id_from_fakeid(mp_id)
+            if account.lower() in existing or (mp_id and mp_id in existing) or (feed_id and feed_id in existing):
                 stats["existing"] += 1
                 continue
             ok, info = _werss_subscribe_account(base, token, account)
+            if not ok and info == "not_found" and mp_id:
+                ok, info = _werss_subscribe_account_direct(
+                    base,
+                    token,
+                    account,
+                    mp_id,
+                    avatar=entry.get("avatar", ""),
+                    intro=entry.get("intro", ""),
+                )
             if ok:
                 stats["added"] += 1
                 existing[account.lower()] = {"mp_name": info}
+                if mp_id:
+                    existing[mp_id] = {"mp_name": info}
+                if feed_id:
+                    existing[feed_id] = {"mp_name": info}
             else:
                 stats["failed"] += 1
                 stats["failed_accounts"].append({"account": account, "reason": info})
         return stats
-    stats["failed"] += len(account_names)
-    stats["failed_accounts"].extend({"account": account, "reason": "login_failed"} for account in account_names)
+    stats["failed"] += len(entries)
+    stats["failed_accounts"].extend({"account": entry["account"], "reason": "login_failed"} for entry in entries)
     return stats
 
 
@@ -9106,7 +9178,7 @@ def learn_positive_samples_only():
         print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')}{manual_note} | {row.get('title')}")
 
     _save_positive_sample_library(list(by_key.values()))
-    sub_stats = _subscribe_learned_accounts([row.get("account_name", "") for row in learned])
+    sub_stats = _subscribe_learned_accounts(learned)
     if learned:
         with open(POSITIVE_SAMPLE_LEARNED_FILE, "a", encoding="utf-8") as f:
             for row in learned:
