@@ -109,21 +109,48 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:14b"
 
+PRODUCTION_PAGES_DIR = Path(r"F:\jiangxy2\AI-m-OK")
+SHARED_STATE_DIR = Path(r"F:\jiangxy2\AI\.aim_ok_state")
+ALLOW_LOCAL_RUNTIME_DIRS = os.environ.get("AIM_OK_ALLOW_LOCAL_RUNTIME_DIRS", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _is_local_shadow_dir(path):
+    text = str(path or "")
+    name = Path(text).name.lower() if text else ""
+    return name in {".aim_ok_pages", ".aim_ok_output", ".aim_ok_state"} or "AI-m-OK-code" in text
+
+
+def _resolve_pages_dir():
+    env_value = os.environ.get("PAGES_DIR")
+    if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
+        return Path(env_value)
+    if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
+        print(f"  [WARN] Ignored local-test PAGES_DIR={env_value}; using production pages dir for history dedupe.")
+    for candidate in (PRODUCTION_PAGES_DIR, Path.home() / "AI-m-OK"):
+        if candidate.exists():
+            return candidate
+    return PRODUCTION_PAGES_DIR
+
+
+def _resolve_state_dir():
+    env_value = os.environ.get("AIM_OK_STATE_DIR")
+    if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
+        return Path(env_value)
+    if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
+        print(f"  [WARN] Ignored local-test AIM_OK_STATE_DIR={env_value}; using shared state dir for review learning.")
+    return SHARED_STATE_DIR
+
+
 OUTPUT_DIR = Path.home()
 DEFAULT_PAGES_CANDIDATES = [
-    Path(r"F:\jiangxy2\AI-m-OK"),
+    PRODUCTION_PAGES_DIR,
     Path.home() / "AI-m-OK",
 ]
-PAGES_DIR = Path(
-    os.environ.get(
-        "PAGES_DIR",
-        next((str(p) for p in DEFAULT_PAGES_CANDIDATES if p.exists()), str(DEFAULT_PAGES_CANDIDATES[0])),
-    )
-)
+PAGES_DIR = _resolve_pages_dir()
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
-STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(SCRIPT_DIR / ".aim_ok_state")))
+STATE_DIR = _resolve_state_dir()
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
 SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
