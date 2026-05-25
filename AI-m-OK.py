@@ -143,7 +143,7 @@ SCRIPT_BACKUP_TARGETS = [
     for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
     if x.strip()
 ]
-MAIN_LOCK_FILE = STATE_DIR / "aimok-main.lock"
+MAIN_LOCK_FILE = Path(os.environ.get("AIM_OK_MAIN_LOCK_FILE", str(Path.home() / ".aim_ok_main.lock")))
 _MAIN_LOCK_HANDLE = None
 
 
@@ -156,7 +156,7 @@ def acquire_main_single_instance_lock():
         return True
     handle = None
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        MAIN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
         handle = open(MAIN_LOCK_FILE, "a+", encoding="utf-8")
         handle.seek(0)
         if os.name == "nt":
