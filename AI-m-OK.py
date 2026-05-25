@@ -2751,6 +2751,7 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                 query_expr = f"ytsearch{per_query}:{q}"
                 cmd = prefix + [
                     "--dump-single-json",
+                    "--flat-playlist",
                     "--skip-download",
                     "--no-warnings",
                     "--proxy",
