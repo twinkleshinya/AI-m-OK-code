@@ -2671,13 +2671,12 @@ def scrape_youtube_search_results(queries, max_items=20):
                 if video_url in seen:
                     continue
                 title = title_m.group(1)
-                rel_m = re.search(r'"publishedTimeText":\{"simpleText":"([^"]+)"\}', block, re.IGNORECASE)
-                rel_text = rel_m.group(1) if rel_m else ""
+                rel_text = _extract_youtube_relative_text(block)
                 length_m = re.search(r'"lengthText":\{"(?:simpleText":"([^"]+)"|accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\})', block, re.IGNORECASE)
                 length_text = ""
                 if length_m:
                     length_text = next((g for g in length_m.groups() if g), "")
-                approx_date = parse_relative_date_to_iso(rel_text) or _now_iso()
+                approx_date = parse_relative_date_to_iso(rel_text)
                 if rel_text and not is_within_days(approx_date, YOUTUBE_MAX_AGE_DAYS):
                     continue
                 seen.add(video_url)
@@ -2703,14 +2702,15 @@ def scrape_youtube_search_results(queries, max_items=20):
 
             ids = re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html)
             titles = re.findall(r'"title":\{"runs":\[\{"text":"([^"]{6,120})"', html)
-            rel_times = re.findall(r'"publishedTimeText":\{"simpleText":"([^"]+)"\}', html, re.IGNORECASE)
             for idx, vid in enumerate(ids):
                 video_url = f"https://www.youtube.com/watch?v={vid}"
                 if video_url in seen:
                     continue
                 title = titles[idx] if idx < len(titles) else f"YouTube video {vid}"
-                rel_text = rel_times[idx] if idx < len(rel_times) else ""
-                approx_date = parse_relative_date_to_iso(rel_text) or _now_iso()
+                pos = html.find(f'"videoId":"{vid}"')
+                block = html[pos:pos + 2500] if pos >= 0 else ""
+                rel_text = _extract_youtube_relative_text(block)
+                approx_date = parse_relative_date_to_iso(rel_text)
                 if rel_text and not is_within_days(approx_date, YOUTUBE_MAX_AGE_DAYS):
                     continue
                 seen.add(video_url)
@@ -2737,26 +2737,24 @@ def scrape_youtube_search_results(queries, max_items=20):
 
 def scrape_youtube_by_ytdlp_search(queries, max_items=20):
     """
-    用 yt-dlp 的 ytsearchdate 直接拉“最新视频”，减少网页搜索页旧内容混入。
-    仅作为候选获取器，最终发布时间仍由 _extract_youtube_published_date 二次校验。
+    用 yt-dlp 的 ytsearch 拉候选；ytsearchdate 在新版 yt-dlp 中已不可用。
+    最终发布时间仍由 upload_date/timestamp 或 _extract_youtube_published_date 校验。
     """
     items = []
     seen = set()
-    commands = []
-    exe = shutil.which("yt-dlp")
-    if exe:
-        commands.append([exe])
-    commands.append([sys.executable, "-m", "yt_dlp"])
+    diag = {"unsupported_scheme": 0, "proxy_error": 0, "timeout": 0, "rate_limited": 0, "other_error": 0, "empty": 0}
 
     per_query = max(1, min(4, max_items // max(1, min(len(queries), VIDEO_QUERY_LIMIT))))
     for q in queries[:VIDEO_QUERY_LIMIT]:
-        for prefix in commands:
+        for prefix in _yt_dlp_commands():
             try:
-                query_expr = f"ytsearchdate{per_query}:{q}"
+                query_expr = f"ytsearch{per_query}:{q}"
                 cmd = prefix + [
                     "--dump-single-json",
                     "--skip-download",
                     "--no-warnings",
+                    "--proxy",
+                    "",
                     "--extractor-args",
                     "youtube:lang=zh-CN",
                     query_expr,
@@ -2768,11 +2766,15 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                     encoding="utf-8",
                     errors="replace",
                     timeout=max(YTDLP_TIMEOUT, 12),
+                    env=_yt_dlp_clean_env(),
                 )
                 if proc.returncode != 0 or not proc.stdout.strip():
+                    _merge_ytdlp_diag(diag, proc.stderr)
                     continue
                 data = json.loads(proc.stdout)
                 entries = data.get("entries", []) if isinstance(data, dict) else []
+                if not entries:
+                    diag["empty"] = diag.get("empty", 0) + 1
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
@@ -2788,6 +2790,8 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                     upload_date = normalize_yt_dlp_date(entry.get("upload_date"))
                     if not upload_date:
                         upload_date = normalize_yt_dlp_timestamp(entry.get("timestamp"))
+                    if not upload_date:
+                        upload_date = normalize_yt_dlp_timestamp(entry.get("release_timestamp"))
                     seen.add(webpage_url)
                     items.append({
                         "title": title,
@@ -2809,7 +2813,10 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                         return items
                 break
             except Exception:
+                diag["other_error"] = diag.get("other_error", 0) + 1
                 continue
+    if not items:
+        _print_youtube_ytdlp_diag(diag)
     return items
 
 
@@ -4430,23 +4437,107 @@ def normalize_yt_dlp_timestamp(value):
         return ""
 
 
-def _run_yt_dlp_json(url):
-    """
-    优先用 yt-dlp 获取 YouTube 元数据。未安装或失败时返回 None，不影响主流程。
-    """
+YTDLP_PROXY_ENV_KEYS = {
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+}
+
+
+def _yt_dlp_commands():
     commands = []
     exe = shutil.which("yt-dlp")
     if exe:
         commands.append([exe])
     commands.append([sys.executable, "-m", "yt_dlp"])
+    return commands
 
-    for prefix in commands:
+
+def _yt_dlp_clean_env():
+    env = os.environ.copy()
+    for key in YTDLP_PROXY_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def _classify_yt_dlp_error(stderr):
+    text = (stderr or "").strip()
+    low = text.lower()
+    if "unsupported url scheme" in low or "ytsearchdate" in low:
+        return "unsupported_scheme"
+    if "proxy" in low or "127.0.0.1:9" in low:
+        return "proxy_error"
+    if "timed out" in low or "timeout" in low:
+        return "timeout"
+    if "429" in low or "too many requests" in low:
+        return "rate_limited"
+    if text:
+        return "other_error"
+    return "empty"
+
+
+def _merge_ytdlp_diag(diag, stderr):
+    if diag is None:
+        return
+    key = _classify_yt_dlp_error(stderr)
+    diag[key] = diag.get(key, 0) + 1
+
+
+def _print_youtube_ytdlp_diag(diag):
+    if not diag or not any(diag.values()):
+        return
+    print(
+        "      [B.5] YouTube yt-dlp诊断: "
+        f"不支持scheme={diag.get('unsupported_scheme', 0)}, "
+        f"代理错误={diag.get('proxy_error', 0)}, "
+        f"超时={diag.get('timeout', 0)}, "
+        f"限流={diag.get('rate_limited', 0)}, "
+        f"搜索为空={diag.get('empty', 0)}, "
+        f"其他错误={diag.get('other_error', 0)}"
+    )
+
+
+def _extract_youtube_relative_text(block):
+    candidates = []
+    patterns = [
+        r'"publishedTimeText"\s*:\s*\{\s*"simpleText"\s*:\s*"([^"]+)"',
+        r'"publishedTimeText"\s*:\s*\{\s*"runs"\s*:\s*\[\s*\{\s*"text"\s*:\s*"([^"]+)"',
+        r'"publishedTimeText".{0,500}?"accessibilityData"\s*:\s*\{\s*"label"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, block, re.IGNORECASE | re.DOTALL)
+        if m:
+            candidates.append(m.group(1))
+
+    runs_m = re.search(r'"publishedTimeText"\s*:\s*\{\s*"runs"\s*:\s*\[(.*?)\]\s*\}', block, re.IGNORECASE | re.DOTALL)
+    if runs_m:
+        run_text = "".join(re.findall(r'"text"\s*:\s*"([^"]+)"', runs_m.group(1)))
+        if run_text:
+            candidates.append(run_text)
+
+    for cand in candidates:
+        text = unescape(cand).replace("\\u0026", "&").replace("\\/", "/").strip()
+        if parse_relative_date_to_iso(text):
+            return text
+    return ""
+
+
+def _run_yt_dlp_json(url):
+    """
+    优先用 yt-dlp 获取 YouTube 元数据。未安装或失败时返回 None，不影响主流程。
+    """
+    for prefix in _yt_dlp_commands():
         try:
             cmd = prefix + [
                 "--dump-single-json",
                 "--skip-download",
                 "--no-warnings",
                 "--no-playlist",
+                "--proxy",
+                "",
                 url,
             ]
             proc = subprocess.run(
@@ -4456,6 +4547,7 @@ def _run_yt_dlp_json(url):
                 encoding="utf-8",
                 errors="replace",
                 timeout=YTDLP_TIMEOUT,
+                env=_yt_dlp_clean_env(),
             )
             if proc.returncode != 0 or not proc.stdout.strip():
                 continue
@@ -5201,6 +5293,11 @@ def _extract_youtube_published_date(url):
                 m = re.search(pattern, clean, re.IGNORECASE)
                 if m:
                     return m.group(1), "medium"
+
+        rel_text = _extract_youtube_relative_text(html)
+        rel_date = parse_relative_date_to_iso(rel_text)
+        if rel_date:
+            return rel_date, "medium"
     except Exception:
         pass
     return "", "low"
@@ -5913,10 +6010,18 @@ def fetch_thepaper():
 def fetch_youtube():
     source = "YouTube"
     items = []
-    stats = {"raw": 0, "non_video": 0, "date": 0, "keyword": 0}
+    stats = {
+        "raw": 0,
+        "non_video": 0,
+        "date": 0,
+        "keyword": 0,
+        "no_date": 0,
+        "low_conf_date": 0,
+        "old_date": 0,
+    }
     print("      [B.5] YouTube 抓取中...")
 
-    # 1) 先用 yt-dlp 按最新时间搜索，尽量避免抓到 오래旧热视频
+    # 1) 先用 yt-dlp 搜索视频，再用 upload_date/timestamp 做时效校验
     items.extend(scrape_youtube_by_ytdlp_search(
         (SOCIAL_PRACTICAL_QUERIES + AUDIO_MUSIC_GAME_QUERIES)[:VIDEO_QUERY_LIMIT],
         max_items=VIDEO_CANDIDATE_MAX,
@@ -5986,21 +6091,24 @@ def fetch_youtube():
         elif it.get("date"):
             effective_date = it.get("date", "")
             effective_conf = "medium" if not it.get("date_inferred") else "low"
-        elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
+        elif it.get("_search_rel_date"):
             effective_date = it.get("_search_rel_date", "")
-            effective_conf = "low"
+            effective_conf = "search_rel"
 
         # 对于 YouTube，优先真实日期；若页面抓不到但搜索结果本身明确落在时间窗内，则允许低置信度兜底
         if not effective_date:
+            stats["no_date"] += 1
             stats["date"] += 1
             continue
         if YOUTUBE_REQUIRE_CONFIDENT_DATE and effective_conf == "low":
+            stats["low_conf_date"] += 1
             stats["date"] += 1
             continue
         it["date"] = effective_date
         it["date_inferred"] = effective_conf != "high"
         it["_date_confidence"] = effective_conf
         if not is_within_days(effective_date, YOUTUBE_MAX_AGE_DAYS):
+            stats["old_date"] += 1
             stats["date"] += 1
             continue
         if not practical_video_gate(it):
@@ -6010,6 +6118,11 @@ def fetch_youtube():
         dedup.append(_mark_social_item(it, platform="YouTube", is_video=True))
 
     print(f"      [B.5] YouTube 完成: {len(dedup)} 条 (raw={stats['raw']}, 非视频={stats['non_video']}, 日期失败={stats['date']}, 关键词过滤={stats['keyword']})")
+    if stats["date"]:
+        print(
+            "      [B.5] YouTube 诊断: "
+            f"无日期={stats['no_date']}, 低置信日期={stats['low_conf_date']}, 超时效={stats['old_date']}"
+        )
     tracker.record(source, dedup)
     return dedup
 
@@ -6145,11 +6258,11 @@ def fetch_video_tutorial_sources():
                 effective_date = page_date
                 it["date"] = page_date
                 it["date_inferred"] = conf != "high"
-            elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
+            elif it.get("_search_rel_date"):
                 effective_date = it.get("_search_rel_date", "")
                 it["date"] = effective_date
                 it["date_inferred"] = True
-                conf = "low"
+                conf = "search_rel"
             if YOUTUBE_REQUIRE_CONFIDENT_DATE and (not page_date) and conf == "low":
                 stats["date"] += 1
                 continue
