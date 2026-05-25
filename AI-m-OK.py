@@ -143,7 +143,10 @@ SCRIPT_BACKUP_TARGETS = [
     for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
     if x.strip()
 ]
-MAIN_LOCK_FILE = Path(os.environ.get("AIM_OK_MAIN_LOCK_FILE", str(Path.home() / ".aim_ok_main.lock")))
+DEFAULT_MAIN_LOCK_FILE = Path(r"F:\jiangxy2\AI\.aim_ok_state\aimok-main.lock")
+if not DEFAULT_MAIN_LOCK_FILE.parent.exists():
+    DEFAULT_MAIN_LOCK_FILE = SCRIPT_DIR / ".aim_ok_state" / "aimok-main.lock"
+MAIN_LOCK_FILE = Path(os.environ.get("AIM_OK_MAIN_LOCK_FILE", str(DEFAULT_MAIN_LOCK_FILE)))
 _MAIN_LOCK_HANDLE = None
 
 
