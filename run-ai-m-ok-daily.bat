@@ -4,6 +4,7 @@ setlocal
 chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
+set PYTHONDONTWRITEBYTECODE=1
 
 set "WORKDIR=F:\jiangxy2\AI"
 set "SCRIPT=%WORKDIR%\AI-m-OK.py"
