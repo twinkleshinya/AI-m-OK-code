@@ -125,7 +125,7 @@ def _resolve_pages_dir():
     if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
         return Path(env_value)
     if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
-        print(f"  [WARN] Ignored local-test PAGES_DIR={env_value}; using production pages dir for history dedupe.")
+        print(f"  [WARN] 忽略本地测试 PAGES_DIR={env_value}，改用正式发布目录，避免历史去重失效。")
     for candidate in (PRODUCTION_PAGES_DIR, Path.home() / "AI-m-OK"):
         if candidate.exists():
             return candidate
@@ -137,7 +137,7 @@ def _resolve_state_dir():
     if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
         return Path(env_value)
     if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
-        print(f"  [WARN] Ignored local-test AIM_OK_STATE_DIR={env_value}; using shared state dir for review learning.")
+        print(f"  [WARN] 忽略本地测试 AIM_OK_STATE_DIR={env_value}，改用共享状态目录，避免审核学习失效。")
     return SHARED_STATE_DIR
 
 
@@ -1669,7 +1669,22 @@ def load_push_archive_for_display():
             continue
         merged[key] = row
         ordered.append(key)
-    return [merged[key] for key in ordered][:PUSH_ARCHIVE_MAX_ITEMS]
+    display_rows = [merged[key] for key in ordered]
+
+    def sort_key(row):
+        raw = row.get("pushed_at") or row.get("pushed_date") or ""
+        text = str(raw or "").strip()
+        try:
+            if "T" in text:
+                return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if text:
+                return datetime.fromisoformat(text[:10]).replace(tzinfo=BEIJING_TZ)
+        except Exception:
+            pass
+        return datetime.min.replace(tzinfo=BEIJING_TZ)
+
+    display_rows.sort(key=sort_key, reverse=True)
+    return display_rows[:PUSH_ARCHIVE_MAX_ITEMS]
 
 
 def _ensure_state_dir():
