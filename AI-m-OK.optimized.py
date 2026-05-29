@@ -15,7 +15,9 @@ AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 
 import json
 import hashlib
+import base64
 import os
+import atexit
 import queue
 import random
 import re
@@ -24,7 +26,8 @@ import subprocess
 import threading
 import time
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from html import escape, unescape
@@ -36,6 +39,10 @@ import feedparser
 import requests
 
 import sys
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 try:
     from review_server import start_review_server
 except Exception:
@@ -91,30 +98,59 @@ REVIEW_NOTIFY_BLOCKED_WEBHOOKS = {
 }
 REVIEW_NOTIFY_WEBHOOKS = []
 
-FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "5"))
-FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "15"))
-FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "25"))
+FEISHU_CONNECT_TIMEOUT = float(os.environ.get("FEISHU_CONNECT_TIMEOUT", "4"))
+FEISHU_READ_TIMEOUT = float(os.environ.get("FEISHU_READ_TIMEOUT", "8"))
+FEISHU_HARD_TIMEOUT = float(os.environ.get("FEISHU_HARD_TIMEOUT", "12"))
 FEISHU_PUSH_RETRIES = max(1, int(os.environ.get("FEISHU_PUSH_RETRIES", "2")))
+FEISHU_TOTAL_TIMEOUT = float(os.environ.get("FEISHU_TOTAL_TIMEOUT", "35"))
+FEISHU_TEXT_FALLBACK = os.environ.get("FEISHU_TEXT_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:14b"
 
+PRODUCTION_PAGES_DIR = Path(r"F:\jiangxy2\AI-m-OK")
+SHARED_STATE_DIR = Path(r"F:\jiangxy2\AI\.aim_ok_state")
+ALLOW_LOCAL_RUNTIME_DIRS = os.environ.get("AIM_OK_ALLOW_LOCAL_RUNTIME_DIRS", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _is_local_shadow_dir(path):
+    text = str(path or "")
+    name = Path(text).name.lower() if text else ""
+    return name in {".aim_ok_pages", ".aim_ok_output", ".aim_ok_state"} or "AI-m-OK-code" in text
+
+
+def _resolve_pages_dir():
+    env_value = os.environ.get("PAGES_DIR")
+    if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
+        return Path(env_value)
+    if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
+        print(f"  [WARN] 忽略本地测试 PAGES_DIR={env_value}，改用正式发布目录，避免历史去重失效。")
+    for candidate in (PRODUCTION_PAGES_DIR, Path.home() / "AI-m-OK"):
+        if candidate.exists():
+            return candidate
+    return PRODUCTION_PAGES_DIR
+
+
+def _resolve_state_dir():
+    env_value = os.environ.get("AIM_OK_STATE_DIR")
+    if env_value and not (not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value)):
+        return Path(env_value)
+    if env_value and not ALLOW_LOCAL_RUNTIME_DIRS and _is_local_shadow_dir(env_value):
+        print(f"  [WARN] 忽略本地测试 AIM_OK_STATE_DIR={env_value}，改用共享状态目录，避免审核学习失效。")
+    return SHARED_STATE_DIR
+
+
 OUTPUT_DIR = Path.home()
 DEFAULT_PAGES_CANDIDATES = [
-    Path(r"F:\jiangxy2\AI-m-OK"),
+    PRODUCTION_PAGES_DIR,
     Path.home() / "AI-m-OK",
 ]
-PAGES_DIR = Path(
-    os.environ.get(
-        "PAGES_DIR",
-        next((str(p) for p in DEFAULT_PAGES_CANDIDATES if p.exists()), str(DEFAULT_PAGES_CANDIDATES[0])),
-    )
-)
+PAGES_DIR = _resolve_pages_dir()
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
-STATE_DIR = Path(os.environ.get("AIM_OK_STATE_DIR", str(SCRIPT_DIR / ".aim_ok_state")))
+STATE_DIR = _resolve_state_dir()
 REVIEW_FEEDBACK_FILE = STATE_DIR / "review_feedback.jsonl"
 REVIEW_FEEDBACK_MAX_ROWS = int(os.environ.get("REVIEW_FEEDBACK_MAX_ROWS", "4000"))
 SUMMARY_CACHE_FILE = Path(os.environ.get("SUMMARY_CACHE_FILE", str(STATE_DIR / "summary_cache.json")))
@@ -134,6 +170,66 @@ SCRIPT_BACKUP_TARGETS = [
     for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
     if x.strip()
 ]
+DEFAULT_MAIN_LOCK_FILE = Path(r"F:\jiangxy2\AI\.aim_ok_state\aimok-main.lock")
+if not DEFAULT_MAIN_LOCK_FILE.parent.exists():
+    DEFAULT_MAIN_LOCK_FILE = SCRIPT_DIR / ".aim_ok_state" / "aimok-main.lock"
+MAIN_LOCK_FILE = Path(os.environ.get("AIM_OK_MAIN_LOCK_FILE", str(DEFAULT_MAIN_LOCK_FILE)))
+_MAIN_LOCK_HANDLE = None
+
+
+def acquire_main_single_instance_lock():
+    """
+    防止定时任务、手动运行、代码库副本同时跑，导致审核页/飞书推送互相抢状态。
+    """
+    global _MAIN_LOCK_HANDLE
+    if _MAIN_LOCK_HANDLE is not None:
+        return True
+    handle = None
+    try:
+        MAIN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(MAIN_LOCK_FILE, "a+", encoding="utf-8")
+        handle.seek(0)
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"pid={os.getpid()} started_at={_now_iso()} cwd={Path.cwd()}\n")
+        handle.flush()
+        _MAIN_LOCK_HANDLE = handle
+        return True
+    except Exception as exc:
+        try:
+            if handle is not None:
+                handle.close()
+        except Exception:
+            pass
+        print(f"[ERROR] 检测到已有 AI'm OK 主流程正在运行，本次退出，避免重复推送/卡住。lock={MAIN_LOCK_FILE} ({exc})")
+        return False
+
+
+def release_main_single_instance_lock():
+    global _MAIN_LOCK_HANDLE
+    handle = _MAIN_LOCK_HANDLE
+    if handle is None:
+        return
+    try:
+        handle.seek(0)
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        handle.close()
+    except Exception:
+        pass
+    _MAIN_LOCK_HANDLE = None
+
+
+atexit.register(release_main_single_instance_lock)
 
 # ── 数量与多样性约束 ──
 MAX_ITEMS = 26
@@ -1573,7 +1669,22 @@ def load_push_archive_for_display():
             continue
         merged[key] = row
         ordered.append(key)
-    return [merged[key] for key in ordered][:PUSH_ARCHIVE_MAX_ITEMS]
+    display_rows = [merged[key] for key in ordered]
+
+    def sort_key(row):
+        raw = row.get("pushed_at") or row.get("pushed_date") or ""
+        text = str(raw or "").strip()
+        try:
+            if "T" in text:
+                return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if text:
+                return datetime.fromisoformat(text[:10]).replace(tzinfo=BEIJING_TZ)
+        except Exception:
+            pass
+        return datetime.min.replace(tzinfo=BEIJING_TZ)
+
+    display_rows.sort(key=sort_key, reverse=True)
+    return display_rows[:PUSH_ARCHIVE_MAX_ITEMS]
 
 
 def _ensure_state_dir():
@@ -2670,13 +2781,12 @@ def scrape_youtube_search_results(queries, max_items=20):
                 if video_url in seen:
                     continue
                 title = title_m.group(1)
-                rel_m = re.search(r'"publishedTimeText":\{"simpleText":"([^"]+)"\}', block, re.IGNORECASE)
-                rel_text = rel_m.group(1) if rel_m else ""
+                rel_text = _extract_youtube_relative_text(block)
                 length_m = re.search(r'"lengthText":\{"(?:simpleText":"([^"]+)"|accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\})', block, re.IGNORECASE)
                 length_text = ""
                 if length_m:
                     length_text = next((g for g in length_m.groups() if g), "")
-                approx_date = parse_relative_date_to_iso(rel_text) or _now_iso()
+                approx_date = parse_relative_date_to_iso(rel_text)
                 if rel_text and not is_within_days(approx_date, YOUTUBE_MAX_AGE_DAYS):
                     continue
                 seen.add(video_url)
@@ -2702,14 +2812,15 @@ def scrape_youtube_search_results(queries, max_items=20):
 
             ids = re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html)
             titles = re.findall(r'"title":\{"runs":\[\{"text":"([^"]{6,120})"', html)
-            rel_times = re.findall(r'"publishedTimeText":\{"simpleText":"([^"]+)"\}', html, re.IGNORECASE)
             for idx, vid in enumerate(ids):
                 video_url = f"https://www.youtube.com/watch?v={vid}"
                 if video_url in seen:
                     continue
                 title = titles[idx] if idx < len(titles) else f"YouTube video {vid}"
-                rel_text = rel_times[idx] if idx < len(rel_times) else ""
-                approx_date = parse_relative_date_to_iso(rel_text) or _now_iso()
+                pos = html.find(f'"videoId":"{vid}"')
+                block = html[pos:pos + 2500] if pos >= 0 else ""
+                rel_text = _extract_youtube_relative_text(block)
+                approx_date = parse_relative_date_to_iso(rel_text)
                 if rel_text and not is_within_days(approx_date, YOUTUBE_MAX_AGE_DAYS):
                     continue
                 seen.add(video_url)
@@ -2736,26 +2847,25 @@ def scrape_youtube_search_results(queries, max_items=20):
 
 def scrape_youtube_by_ytdlp_search(queries, max_items=20):
     """
-    用 yt-dlp 的 ytsearchdate 直接拉“最新视频”，减少网页搜索页旧内容混入。
-    仅作为候选获取器，最终发布时间仍由 _extract_youtube_published_date 二次校验。
+    用 yt-dlp 的 ytsearch 拉候选；ytsearchdate 在新版 yt-dlp 中已不可用。
+    最终发布时间仍由 upload_date/timestamp 或 _extract_youtube_published_date 校验。
     """
     items = []
     seen = set()
-    commands = []
-    exe = shutil.which("yt-dlp")
-    if exe:
-        commands.append([exe])
-    commands.append([sys.executable, "-m", "yt_dlp"])
+    diag = {"unsupported_scheme": 0, "proxy_error": 0, "timeout": 0, "rate_limited": 0, "other_error": 0, "empty": 0}
 
     per_query = max(1, min(4, max_items // max(1, min(len(queries), VIDEO_QUERY_LIMIT))))
     for q in queries[:VIDEO_QUERY_LIMIT]:
-        for prefix in commands:
+        for prefix in _yt_dlp_commands():
             try:
-                query_expr = f"ytsearchdate{per_query}:{q}"
+                query_expr = f"ytsearch{per_query}:{q}"
                 cmd = prefix + [
                     "--dump-single-json",
+                    "--flat-playlist",
                     "--skip-download",
                     "--no-warnings",
+                    "--proxy",
+                    "",
                     "--extractor-args",
                     "youtube:lang=zh-CN",
                     query_expr,
@@ -2767,11 +2877,15 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                     encoding="utf-8",
                     errors="replace",
                     timeout=max(YTDLP_TIMEOUT, 12),
+                    env=_yt_dlp_clean_env(),
                 )
                 if proc.returncode != 0 or not proc.stdout.strip():
+                    _merge_ytdlp_diag(diag, proc.stderr)
                     continue
                 data = json.loads(proc.stdout)
                 entries = data.get("entries", []) if isinstance(data, dict) else []
+                if not entries:
+                    diag["empty"] = diag.get("empty", 0) + 1
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
@@ -2787,6 +2901,8 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                     upload_date = normalize_yt_dlp_date(entry.get("upload_date"))
                     if not upload_date:
                         upload_date = normalize_yt_dlp_timestamp(entry.get("timestamp"))
+                    if not upload_date:
+                        upload_date = normalize_yt_dlp_timestamp(entry.get("release_timestamp"))
                     seen.add(webpage_url)
                     items.append({
                         "title": title,
@@ -2808,7 +2924,10 @@ def scrape_youtube_by_ytdlp_search(queries, max_items=20):
                         return items
                 break
             except Exception:
+                diag["other_error"] = diag.get("other_error", 0) + 1
                 continue
+    if not items:
+        _print_youtube_ytdlp_diag(diag)
     return items
 
 
@@ -3800,6 +3919,35 @@ def _werss_subscribe_account(base, token, account):
     return True, nickname
 
 
+def _werss_subscribe_account_direct(base, token, account, mp_id, avatar="", intro=""):
+    account = str(account or "").strip()
+    mp_id = str(mp_id or "").strip()
+    if not account:
+        return False, "missing_account"
+    if not mp_id:
+        return False, "missing_mp_id"
+    feed_id = _werss_feed_id_from_fakeid(mp_id)
+    if not feed_id:
+        return False, "invalid_mp_id"
+    payload = {
+        "mp_name": account,
+        "mp_id": mp_id,
+        "avatar": str(avatar or "").strip(),
+        "mp_intro": str(intro or "").strip()[:250],
+    }
+    resp = _werss_request_json(
+        base,
+        "/api/v1/wx/mps",
+        token=token,
+        method="POST",
+        timeout=max(12, LISTING_FETCH_TIMEOUT),
+        json_body=payload,
+    )
+    if resp is None:
+        return False, "direct_add_failed"
+    return True, account
+
+
 def _ensure_werss_ai_subscriptions(base, token):
     if not WERSS_AUTO_SUBSCRIBE:
         return {"added": 0, "existing": 0, "failed": 0, "checked": 0}
@@ -4400,23 +4548,107 @@ def normalize_yt_dlp_timestamp(value):
         return ""
 
 
-def _run_yt_dlp_json(url):
-    """
-    优先用 yt-dlp 获取 YouTube 元数据。未安装或失败时返回 None，不影响主流程。
-    """
+YTDLP_PROXY_ENV_KEYS = {
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+}
+
+
+def _yt_dlp_commands():
     commands = []
     exe = shutil.which("yt-dlp")
     if exe:
         commands.append([exe])
     commands.append([sys.executable, "-m", "yt_dlp"])
+    return commands
 
-    for prefix in commands:
+
+def _yt_dlp_clean_env():
+    env = os.environ.copy()
+    for key in YTDLP_PROXY_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def _classify_yt_dlp_error(stderr):
+    text = (stderr or "").strip()
+    low = text.lower()
+    if "unsupported url scheme" in low or "ytsearchdate" in low:
+        return "unsupported_scheme"
+    if "proxy" in low or "127.0.0.1:9" in low:
+        return "proxy_error"
+    if "timed out" in low or "timeout" in low:
+        return "timeout"
+    if "429" in low or "too many requests" in low:
+        return "rate_limited"
+    if text:
+        return "other_error"
+    return "empty"
+
+
+def _merge_ytdlp_diag(diag, stderr):
+    if diag is None:
+        return
+    key = _classify_yt_dlp_error(stderr)
+    diag[key] = diag.get(key, 0) + 1
+
+
+def _print_youtube_ytdlp_diag(diag):
+    if not diag or not any(diag.values()):
+        return
+    print(
+        "      [B.5] YouTube yt-dlp诊断: "
+        f"不支持scheme={diag.get('unsupported_scheme', 0)}, "
+        f"代理错误={diag.get('proxy_error', 0)}, "
+        f"超时={diag.get('timeout', 0)}, "
+        f"限流={diag.get('rate_limited', 0)}, "
+        f"搜索为空={diag.get('empty', 0)}, "
+        f"其他错误={diag.get('other_error', 0)}"
+    )
+
+
+def _extract_youtube_relative_text(block):
+    candidates = []
+    patterns = [
+        r'"publishedTimeText"\s*:\s*\{\s*"simpleText"\s*:\s*"([^"]+)"',
+        r'"publishedTimeText"\s*:\s*\{\s*"runs"\s*:\s*\[\s*\{\s*"text"\s*:\s*"([^"]+)"',
+        r'"publishedTimeText".{0,500}?"accessibilityData"\s*:\s*\{\s*"label"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, block, re.IGNORECASE | re.DOTALL)
+        if m:
+            candidates.append(m.group(1))
+
+    runs_m = re.search(r'"publishedTimeText"\s*:\s*\{\s*"runs"\s*:\s*\[(.*?)\]\s*\}', block, re.IGNORECASE | re.DOTALL)
+    if runs_m:
+        run_text = "".join(re.findall(r'"text"\s*:\s*"([^"]+)"', runs_m.group(1)))
+        if run_text:
+            candidates.append(run_text)
+
+    for cand in candidates:
+        text = unescape(cand).replace("\\u0026", "&").replace("\\/", "/").strip()
+        if parse_relative_date_to_iso(text):
+            return text
+    return ""
+
+
+def _run_yt_dlp_json(url):
+    """
+    优先用 yt-dlp 获取 YouTube 元数据。未安装或失败时返回 None，不影响主流程。
+    """
+    for prefix in _yt_dlp_commands():
         try:
             cmd = prefix + [
                 "--dump-single-json",
                 "--skip-download",
                 "--no-warnings",
                 "--no-playlist",
+                "--proxy",
+                "",
                 url,
             ]
             proc = subprocess.run(
@@ -4426,6 +4658,7 @@ def _run_yt_dlp_json(url):
                 encoding="utf-8",
                 errors="replace",
                 timeout=YTDLP_TIMEOUT,
+                env=_yt_dlp_clean_env(),
             )
             if proc.returncode != 0 or not proc.stdout.strip():
                 continue
@@ -5171,6 +5404,11 @@ def _extract_youtube_published_date(url):
                 m = re.search(pattern, clean, re.IGNORECASE)
                 if m:
                     return m.group(1), "medium"
+
+        rel_text = _extract_youtube_relative_text(html)
+        rel_date = parse_relative_date_to_iso(rel_text)
+        if rel_date:
+            return rel_date, "medium"
     except Exception:
         pass
     return "", "low"
@@ -5883,10 +6121,18 @@ def fetch_thepaper():
 def fetch_youtube():
     source = "YouTube"
     items = []
-    stats = {"raw": 0, "non_video": 0, "date": 0, "keyword": 0}
+    stats = {
+        "raw": 0,
+        "non_video": 0,
+        "date": 0,
+        "keyword": 0,
+        "no_date": 0,
+        "low_conf_date": 0,
+        "old_date": 0,
+    }
     print("      [B.5] YouTube 抓取中...")
 
-    # 1) 先用 yt-dlp 按最新时间搜索，尽量避免抓到 오래旧热视频
+    # 1) 先用 yt-dlp 搜索视频，再用 upload_date/timestamp 做时效校验
     items.extend(scrape_youtube_by_ytdlp_search(
         (SOCIAL_PRACTICAL_QUERIES + AUDIO_MUSIC_GAME_QUERIES)[:VIDEO_QUERY_LIMIT],
         max_items=VIDEO_CANDIDATE_MAX,
@@ -5956,21 +6202,24 @@ def fetch_youtube():
         elif it.get("date"):
             effective_date = it.get("date", "")
             effective_conf = "medium" if not it.get("date_inferred") else "low"
-        elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
+        elif it.get("_search_rel_date"):
             effective_date = it.get("_search_rel_date", "")
-            effective_conf = "low"
+            effective_conf = "search_rel"
 
         # 对于 YouTube，优先真实日期；若页面抓不到但搜索结果本身明确落在时间窗内，则允许低置信度兜底
         if not effective_date:
+            stats["no_date"] += 1
             stats["date"] += 1
             continue
         if YOUTUBE_REQUIRE_CONFIDENT_DATE and effective_conf == "low":
+            stats["low_conf_date"] += 1
             stats["date"] += 1
             continue
         it["date"] = effective_date
         it["date_inferred"] = effective_conf != "high"
         it["_date_confidence"] = effective_conf
         if not is_within_days(effective_date, YOUTUBE_MAX_AGE_DAYS):
+            stats["old_date"] += 1
             stats["date"] += 1
             continue
         if not practical_video_gate(it):
@@ -5980,6 +6229,11 @@ def fetch_youtube():
         dedup.append(_mark_social_item(it, platform="YouTube", is_video=True))
 
     print(f"      [B.5] YouTube 完成: {len(dedup)} 条 (raw={stats['raw']}, 非视频={stats['non_video']}, 日期失败={stats['date']}, 关键词过滤={stats['keyword']})")
+    if stats["date"]:
+        print(
+            "      [B.5] YouTube 诊断: "
+            f"无日期={stats['no_date']}, 低置信日期={stats['low_conf_date']}, 超时效={stats['old_date']}"
+        )
     tracker.record(source, dedup)
     return dedup
 
@@ -6115,11 +6369,11 @@ def fetch_video_tutorial_sources():
                 effective_date = page_date
                 it["date"] = page_date
                 it["date_inferred"] = conf != "high"
-            elif YOUTUBE_ALLOW_SEARCH_REL_FALLBACK and it.get("_search_rel_date"):
+            elif it.get("_search_rel_date"):
                 effective_date = it.get("_search_rel_date", "")
                 it["date"] = effective_date
                 it["date_inferred"] = True
-                conf = "low"
+                conf = "search_rel"
             if YOUTUBE_REQUIRE_CONFIDENT_DATE and (not page_date) and conf == "low":
                 stats["date"] += 1
                 continue
@@ -8641,6 +8895,31 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         wechat_max=FEISHU_WECHAT_MAX,
         preserve_order=True,
     )
+    feishu_item_urls = {
+        str(it.get("url", "") or "").rstrip("/")
+        for it in feishu_items
+        if it.get("url")
+    }
+    manual_section_items = [
+        it for it in ranked_feishu_items
+        if it.get("_manual_review_section_changed")
+        and it.get("_review_section") in {"intl", "domestic"}
+        and str(it.get("url", "") or "").rstrip("/") not in feishu_item_urls
+    ]
+    if manual_section_items:
+        for item in manual_section_items:
+            url = str(item.get("url", "") or "").rstrip("/")
+            if not url or url in feishu_item_urls:
+                continue
+            feishu_items.append(item)
+            feishu_item_urls.add(url)
+        feishu_items.sort(
+            key=lambda x: (
+                int(x.get("_review_rank", 10**6)),
+                -float(x.get("heat_score", 0) or 0),
+            )
+        )
+        print(f"      [v4.8] 手动改为国际/国内的条目已强制保留飞书: {len(manual_section_items)} 条")
     print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
     canonical_audio_urls = {
         str(u or "").rstrip("/")
@@ -8800,62 +9079,208 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
         },
     }
 
+def _feishu_no_proxy_env():
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    return env
+
+
 def _post_feishu_webhook_hard_timeout(webhook, payload):
-    result_queue = queue.Queue(maxsize=1)
+    """
+    飞书 webhook 必须“真硬超时”：请求放进独立 python 子进程。
+    subprocess.run(timeout=...) 到点会杀掉子进程，避免 requests/代理/网络栈拖住主流程。
+    """
+    tmp_path = ""
+    worker_code = r"""
+import json
+import sys
+import requests
 
-    def worker():
-        try:
-            resp = requests.post(
-                webhook.strip(),
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=(FEISHU_CONNECT_TIMEOUT, FEISHU_READ_TIMEOUT),
-            )
-            try:
-                body = resp.json()
-            except Exception:
-                body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
-            result_queue.put(("ok", body))
-        except Exception as exc:
-            result_queue.put(("error", repr(exc)))
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    thread.join(FEISHU_HARD_TIMEOUT)
-    if thread.is_alive():
-        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+webhook = sys.argv[1]
+payload_path = sys.argv[2]
+connect_timeout = float(sys.argv[3])
+read_timeout = float(sys.argv[4])
+with open(payload_path, "r", encoding="utf-8") as f:
+    payload = json.load(f)
+try:
+    with requests.Session() as session:
+        session.trust_env = False
+        resp = session.post(
+            webhook,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=(connect_timeout, read_timeout),
+        )
     try:
-        status, result = result_queue.get_nowait()
-    except queue.Empty:
-        return False, {"error": "empty_response"}
-    if status == "error":
-        return False, {"error": result}
-    return True, result
+        body = resp.json()
+    except Exception:
+        body = {"_status_code": resp.status_code, "_text": (resp.text or "")[:500]}
+    print(json.dumps({"status": "ok", "result": body}, ensure_ascii=False))
+except Exception as exc:
+    print(json.dumps({"status": "error", "result": repr(exc)}, ensure_ascii=False))
+    sys.exit(2)
+"""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            suffix=".feishu.json",
+            prefix="aimok-",
+            dir=str(STATE_DIR),
+            delete=False,
+        ) as f:
+            json.dump(payload, f, ensure_ascii=False)
+            tmp_path = f.name
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                worker_code,
+                webhook.strip(),
+                tmp_path,
+                str(FEISHU_CONNECT_TIMEOUT),
+                str(FEISHU_READ_TIMEOUT),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=FEISHU_HARD_TIMEOUT,
+            env=_feishu_no_proxy_env(),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired:
+        return False, {"error": "hard_timeout", "seconds": FEISHU_HARD_TIMEOUT}
+    except Exception as exc:
+        return False, {"error": repr(exc)}
+    finally:
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if not stdout:
+        return False, {
+            "error": "empty_response",
+            "exitcode": proc.returncode,
+            "stderr": stderr[:500],
+        }
+    try:
+        data = json.loads(stdout.splitlines()[-1])
+    except Exception:
+        return False, {
+            "error": "bad_worker_response",
+            "exitcode": proc.returncode,
+            "stdout": stdout[:500],
+            "stderr": stderr[:500],
+        }
+    if data.get("status") == "error":
+        return False, {"error": data.get("result"), "exitcode": proc.returncode}
+    return True, data.get("result") or {}
+
+
+def _push_single_feishu_webhook(webhook, payload, label, total):
+    last_result = None
+    for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
+        print(f"      Feishu push -> {label}/{total} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
+        ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
+        last_result = result
+        if not ok:
+            print(f"[ERROR] Feishu push failed -> {label} attempt {attempt}: {result}")
+            continue
+        if result.get("StatusCode") == 0 or result.get("code") == 0:
+            print(f"[OK] Feishu push succeeded ✅ -> {label}")
+            return True, result
+        print(f"[WARN] Feishu response -> {label} attempt {attempt}: {result}")
+    return False, last_result or {"error": "unknown"}
+
+
+def _build_feishu_text_fallback_payload(payload):
+    title = "AI'm OK 今日 AI 资讯"
+    page_url = ""
+    try:
+        card = (payload or {}).get("card") or {}
+        title = (((card.get("header") or {}).get("title") or {}).get("content") or title).strip()
+        for element in card.get("elements") or []:
+            for action in element.get("actions") or []:
+                url = (action or {}).get("url") or ""
+                if url:
+                    page_url = url
+                    break
+            if page_url:
+                break
+    except Exception:
+        pass
+    text = f"{title}\n\n🥕 可点击查看网页版 👇"
+    if page_url:
+        text += f"\n{page_url}"
+    text += "\n\n（互动卡片发送失败，已自动改用纯文本兜底。）"
+    return {"msg_type": "text", "content": {"text": text}}
+
+
+def _push_payload_to_valid_feishu_webhooks(payload, valid_webhooks, label_prefix):
+    success_count = 0
+    labels = [f"{label_prefix}{i}" for i in range(1, len(valid_webhooks) + 1)]
+    executor = ThreadPoolExecutor(max_workers=min(len(valid_webhooks), 4))
+    try:
+        future_map = {
+            executor.submit(_push_single_feishu_webhook, webhook, payload, label, len(valid_webhooks)): label
+            for webhook, label in zip(valid_webhooks, labels)
+        }
+        deadline = time.monotonic() + FEISHU_TOTAL_TIMEOUT
+        pending = set(future_map)
+        while pending:
+            remaining = max(0.1, deadline - time.monotonic())
+            if time.monotonic() >= deadline:
+                for future in pending:
+                    future.cancel()
+                print(f"[ERROR] Feishu push total timeout after {FEISHU_TOTAL_TIMEOUT:g}s, 未完成 {len(pending)} 个机器人。")
+                break
+            done, _ = wait(pending, timeout=remaining, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                label = future_map[future]
+                try:
+                    ok, result = future.result()
+                except Exception as exc:
+                    ok, result = False, {"error": repr(exc)}
+                if ok:
+                    success_count += 1
+                else:
+                    print(f"[ERROR] Feishu push finally failed -> {label}: {result}")
+            for future in done:
+                pending.discard(future)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+    return success_count
 
 
 def push_feishu_to_webhooks(payload, webhooks, label_prefix):
-    success_count = 0
     requested_webhooks = [str(x or "").strip() for x in (webhooks or []) if str(x or "").strip()]
     blocked_webhooks = [hook for hook in requested_webhooks if hook not in ALLOWED_FEISHU_WEBHOOKS]
     if blocked_webhooks:
         print(f"      [SECURITY] 已阻止非白名单飞书机器人: {len(blocked_webhooks)} 个")
     valid_webhooks = [hook for hook in requested_webhooks if hook in ALLOWED_FEISHU_WEBHOOKS]
+    if not valid_webhooks:
+        print("      [ERROR] 没有可用的白名单飞书机器人，本次不推送。")
+        return False
     print(
         f"      飞书推送开始: {len(valid_webhooks)} 个机器人 "
-        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES})"
+        f"(connect={FEISHU_CONNECT_TIMEOUT:g}s, read={FEISHU_READ_TIMEOUT:g}s, hard={FEISHU_HARD_TIMEOUT:g}s, "
+        f"total={FEISHU_TOTAL_TIMEOUT:g}s, retries={FEISHU_PUSH_RETRIES}, parallel=yes, proxy=off)"
     )
-    for i, webhook in enumerate(valid_webhooks, 1):
-        for attempt in range(1, FEISHU_PUSH_RETRIES + 1):
-            print(f"      Feishu push -> {label_prefix}{i}/{len(valid_webhooks)} attempt {attempt}/{FEISHU_PUSH_RETRIES}")
-            ok, result = _post_feishu_webhook_hard_timeout(webhook, payload)
-            if not ok:
-                print(f"[ERROR] Feishu push failed -> {label_prefix}{i} attempt {attempt}: {result}")
-                continue
-            if result.get("StatusCode") == 0 or result.get("code") == 0:
-                print(f"[OK] Feishu push succeeded ✅ -> {label_prefix}{i}")
-                success_count += 1
-                break
-            print(f"[WARN] Feishu response -> {label_prefix}{i} attempt {attempt}: {result}")
+    success_count = _push_payload_to_valid_feishu_webhooks(payload, valid_webhooks, label_prefix)
+    if success_count == 0 and FEISHU_TEXT_FALLBACK and (payload or {}).get("msg_type") != "text":
+        print("      [WARN] 飞书互动卡片未送达，尝试纯文本兜底推送。")
+        fallback_payload = _build_feishu_text_fallback_payload(payload)
+        success_count = _push_payload_to_valid_feishu_webhooks(fallback_payload, valid_webhooks, f"{label_prefix}兜底")
     return success_count > 0
 
 
@@ -8908,6 +9333,12 @@ def parse_wechat_sample_page(url):
         r"nick_name:\s*JsDecode\('([^']*)'\)",
         r'id="js_name"[^>]*>\s*(.*?)\s*</a>',
     ])
+    mp_id = first_match([
+        r"biz:\s*['\"]([^'\"]+)['\"]",
+        r"var\s+biz\s*=\s*'([^']+)'",
+        r'var\s+biz\s*=\s*"([^"]+)"',
+        r"[?&]__biz=([^&\"']+)",
+    ])
     author = first_match([
         r'<meta\s+name="author"\s+content="(.*?)"',
         r'id="js_author_name_text"[^>]*>\s*(.*?)\s*</span>',
@@ -8920,6 +9351,7 @@ def parse_wechat_sample_page(url):
         "title": title,
         "summary": summary,
         "account_name": account_name,
+        "mp_id": mp_id,
         "author": author,
         "date": publish_date,
         "source": WECHAT_SOURCE_NAME,
@@ -8985,9 +9417,28 @@ def _save_positive_sample_library(samples):
     _POSITIVE_SAMPLE_CACHE = samples
 
 
-def _subscribe_learned_accounts(account_names):
-    account_names = [x for x in dict.fromkeys(str(a or "").strip() for a in account_names) if x]
-    if not account_names:
+def _subscribe_learned_accounts(samples):
+    entries = []
+    seen = set()
+    for sample in samples or []:
+        if isinstance(sample, dict):
+            account = str(sample.get("account_name", "") or "").strip()
+            mp_id = str(sample.get("mp_id", "") or sample.get("biz", "") or "").strip()
+            avatar = str(sample.get("avatar", "") or sample.get("mp_cover", "") or "").strip()
+            intro = str(sample.get("summary", "") or "").strip()
+        else:
+            account = str(sample or "").strip()
+            mp_id = ""
+            avatar = ""
+            intro = ""
+        if not account:
+            continue
+        key = (account.lower(), mp_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append({"account": account, "mp_id": mp_id, "avatar": avatar, "intro": intro})
+    if not entries:
         return {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     stats = {"added": 0, "existing": 0, "failed": 0, "failed_accounts": []}
     for base in WERSS_BASES:
@@ -8995,20 +9446,36 @@ def _subscribe_learned_accounts(account_names):
         if not token:
             continue
         existing = _werss_existing_subscriptions(base, token)
-        for account in account_names:
-            if account.lower() in existing:
+        for entry in entries:
+            account = entry["account"]
+            mp_id = entry.get("mp_id", "")
+            feed_id = _werss_feed_id_from_fakeid(mp_id)
+            if account.lower() in existing or (mp_id and mp_id in existing) or (feed_id and feed_id in existing):
                 stats["existing"] += 1
                 continue
             ok, info = _werss_subscribe_account(base, token, account)
+            if not ok and info == "not_found" and mp_id:
+                ok, info = _werss_subscribe_account_direct(
+                    base,
+                    token,
+                    account,
+                    mp_id,
+                    avatar=entry.get("avatar", ""),
+                    intro=entry.get("intro", ""),
+                )
             if ok:
                 stats["added"] += 1
                 existing[account.lower()] = {"mp_name": info}
+                if mp_id:
+                    existing[mp_id] = {"mp_name": info}
+                if feed_id:
+                    existing[feed_id] = {"mp_name": info}
             else:
                 stats["failed"] += 1
                 stats["failed_accounts"].append({"account": account, "reason": info})
         return stats
-    stats["failed"] += len(account_names)
-    stats["failed_accounts"].extend({"account": account, "reason": "login_failed"} for account in account_names)
+    stats["failed"] += len(entries)
+    stats["failed_accounts"].extend({"account": entry["account"], "reason": "login_failed"} for entry in entries)
     return stats
 
 
@@ -9081,7 +9548,7 @@ def learn_positive_samples_only():
         print(f"    OK: {row.get('account_name') or '未知公众号'} | {row.get('category')}{manual_note} | {row.get('title')}")
 
     _save_positive_sample_library(list(by_key.values()))
-    sub_stats = _subscribe_learned_accounts([row.get("account_name", "") for row in learned])
+    sub_stats = _subscribe_learned_accounts(learned)
     if learned:
         with open(POSITIVE_SAMPLE_LEARNED_FILE, "a", encoding="utf-8") as f:
             for row in learned:
@@ -9225,6 +9692,8 @@ def backup_script_to_github(date_str):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
+    if not acquire_main_single_instance_lock():
+        return
     today = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
     print(f"\n{'='*60}")
     print(f"  🥕AI'm OK v3.3 | {today}")
