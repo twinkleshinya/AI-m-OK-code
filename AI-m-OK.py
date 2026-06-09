@@ -1922,10 +1922,13 @@ def feedback_bias_score(item, profile=None):
     account = str(item.get("account_name", "") or "").strip()
     product_key = extract_product_dedup_key(item)
     event_fp = extract_event_fingerprint(item)
-    score += profile.get("source_bias", {}).get(source, 0.0) * 1.2
+    is_wechat_item = source == WECHAT_SOURCE_NAME or domain == "mp.weixin.qq.com"
+    if not is_wechat_item:
+        score += profile.get("source_bias", {}).get(source, 0.0) * 1.2
     score += profile.get("category_bias", {}).get(category, 0.0) * 1.0
-    score += profile.get("domain_bias", {}).get(domain, 0.0) * 0.6
-    score += profile.get("account_bias", {}).get(account, 0.0) * 0.7
+    if not is_wechat_item:
+        score += profile.get("domain_bias", {}).get(domain, 0.0) * 0.6
+    score += profile.get("account_bias", {}).get(account, 0.0) * (0.35 if is_wechat_item else 0.7)
     score += profile.get("product_bias", {}).get(product_key, 0.0) * 1.4
     score += profile.get("event_bias", {}).get(event_fp, 0.0) * 1.1
 
@@ -1959,6 +1962,29 @@ def should_filter_by_feedback_profile(item, profile=None):
         return True
     if not item.get("is_positive_sample") and is_similar_to_handled_story(item):
         return True
+
+    # 反馈学习只能“精确屏蔽”已经明确不要的 URL/标题/产品/事件。
+    # 泛化负偏好不能把新的优质公众号内容整批杀掉，否则 WeRSS 抓到上千条也进不了审核池。
+    is_wechat_item = source == WECHAT_SOURCE_NAME or "mp.weixin.qq.com" in str(item.get("url", "") or "")
+    high_value_override = (
+        item.get("is_positive_sample")
+        or is_wechat_audio_priority_item(item)
+        or is_high_value_audio_example(item)
+        or is_high_value_practical_example(item)
+        or is_ai_copyright_item(item)
+        or is_ai_team_management_tool_item(item)
+        or (
+            is_wechat_item
+            and (
+                item.get("is_priority_wechat")
+                or get_wechat_account_hint(item)
+                or audio_relevance_score(item) >= 2
+            )
+        )
+    )
+    if high_value_override:
+        return False
+
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
     domain_bias = float(profile.get("domain_bias", {}).get(domain, 0.0) or 0.0)
@@ -4128,6 +4154,8 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
             items.append(it)
             if max_items and len(items) >= max_items:
                 return items
+        if sqlite_items:
+            return items
         api_items = _fetch_werss_api_articles(base, source_name=source_name, max_items=max_items)
         feed_items = _fetch_werss_feed_articles(base, source_name=source_name, max_items=max_items)
         for it in api_items + feed_items:
