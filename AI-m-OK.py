@@ -152,6 +152,8 @@ DEFAULT_PAGES_CANDIDATES = [
 ]
 PAGES_DIR = _resolve_pages_dir()
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
+PAGES_READY_TIMEOUT = float(os.environ.get("PAGES_READY_TIMEOUT", "180"))
+PAGES_READY_POLL_INTERVAL = float(os.environ.get("PAGES_READY_POLL_INTERVAL", "5"))
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
 STATE_DIR = _resolve_state_dir()
@@ -9696,7 +9698,7 @@ def publish_to_pages(html_content, date_str):
         git_dir = pages / ".git"
         if not git_dir.exists():
             print(f"[WARN] GitHub Pages 目录不是 git 仓库，仅写入静态文件: {pages}")
-            return
+            return True
 
         subprocess.run(["git", "add", "-A"], cwd=str(pages), check=True, capture_output=True)
         diff_proc = subprocess.run(
@@ -9706,7 +9708,7 @@ def publish_to_pages(html_content, date_str):
         )
         if diff_proc.returncode == 0:
             print(f"      Published locally: {PAGES_URL}/latest.html (无新增变更)")
-            return
+            return True
 
         subprocess.run(
             ["git", "commit", "-m", f"update: AI-m-OK {date_str}"],
@@ -9727,8 +9729,42 @@ def publish_to_pages(html_content, date_str):
             cwd=str(pages), check=True, capture_output=True, timeout=60,
         )
         print(f"      Published: {PAGES_URL}/latest.html ✅")
+        return True
     except Exception as e:
         print(f"[WARN] GitHub Pages push failed: {e}")
+        return False
+
+
+def wait_for_published_page(date_str, timeout=None):
+    timeout = max(10.0, float(timeout or PAGES_READY_TIMEOUT))
+    deadline = time.time() + timeout
+    page_url = f"{PAGES_URL}/AI-m-OK-{date_str}.html"
+    expected_title = f"AI'm OK-{date_str}"
+    last_error = ""
+
+    while time.time() < deadline:
+        ts = int(time.time())
+        try:
+            resp = requests.get(
+                f"{page_url}?v={date_str.replace('-', '')}-{ts}",
+                timeout=12,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "User-Agent": "AI-m-OK/PagesReady",
+                },
+                proxies={"http": None, "https": None},
+            )
+            if resp.ok and expected_title in (resp.text or ""):
+                print(f"      网页已上线可访问: {page_url} ✅")
+                return True
+            last_error = f"HTTP {resp.status_code}"
+        except Exception as e:
+            last_error = str(e)
+        time.sleep(max(1.0, PAGES_READY_POLL_INTERVAL))
+
+    print(f"  [WARN] 网页发布后等待超时，线上暂不可确认访问: {page_url} ({last_error})")
+    return False
 
 
 def backup_script_to_github(date_str):
@@ -10115,8 +10151,22 @@ def main():
     output_path.write_text(html, encoding="utf-8")
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
-    card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
-    feishu_ok = push_feishu(card, review_approved=True)
+    print("\n🚀 [Phase H] Publishing...")
+    page_ready = False
+    publish_ok = publish_to_pages(html, today)
+    if publish_ok:
+        page_ready = wait_for_published_page(today)
+    else:
+        print("  [WARN] 网页发布失败，本次仍可人工审核，但不建议立即推送飞书。")
+
+    feishu_ok = False
+    if not publish_ok:
+        print("      网页未成功发布，本次跳过飞书推送。")
+    elif not page_ready:
+        print("      网页尚未确认可访问，本次跳过飞书推送，避免收到打不开的链接。")
+    else:
+        card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
+        feishu_ok = push_feishu(card, review_approved=True)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
     # ── 只有飞书真正推送成功后，才保存历史；审核阶段不算推送 ──
@@ -10141,11 +10191,10 @@ def main():
             f"审核未选排除键 {len(unselected_history_keys)} 条，"
             f"历史浏览归档 {archive_total} 条，后续将避免重复筛出。"
         )
+        publish_to_pages(html, today)
     else:
         print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
 
-    print("\n🚀 [Phase H] Publishing...")
-    publish_to_pages(html, today)
     backup_script_to_github(today)
 
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
