@@ -108,6 +108,10 @@ FEISHU_TEXT_FALLBACK = os.environ.get("FEISHU_TEXT_FALLBACK", "1").strip().lower
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:14b"
+OLLAMA_HOST = "http://localhost:11434"
+OLLAMA_SERVE_CMD = Path(r"C:\Users\jiangxy2\AppData\Local\Programs\Ollama\ollama.exe")
+OLLAMA_START_TIMEOUT = float(os.environ.get("OLLAMA_START_TIMEOUT", "20"))
+_OLLAMA_START_ATTEMPTED = False
 
 PRODUCTION_PAGES_DIR = Path(r"F:\jiangxy2\AI-m-OK")
 SHARED_STATE_DIR = Path(r"F:\jiangxy2\AI\.aim_ok_state")
@@ -2056,6 +2060,82 @@ def _maybe_throttle_request(url):
         REQUEST_HOST_LAST_TS[host] = time.time()
     except Exception:
         return
+
+
+def _ollama_request(path, timeout=5):
+    try:
+        return requests.get(
+            f"{OLLAMA_HOST}{path}",
+            timeout=timeout,
+            proxies={"http": None, "https": None},
+        )
+    except Exception:
+        return None
+
+
+def _is_ollama_ready():
+    resp = _ollama_request("/api/tags", timeout=4)
+    return bool(resp and resp.ok)
+
+
+def _ollama_model_available(model_name):
+    resp = _ollama_request("/api/tags", timeout=6)
+    if not resp or not resp.ok:
+        return None
+    try:
+        data = resp.json() or {}
+        for row in data.get("models", []) or []:
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            if name == model_name or name.split(":", 1)[0] == model_name.split(":", 1)[0]:
+                return True
+    except Exception:
+        return None
+    return False
+
+
+def ensure_ollama_ready():
+    global _OLLAMA_START_ATTEMPTED
+    if _is_ollama_ready():
+        return True
+    if _OLLAMA_START_ATTEMPTED:
+        return False
+    _OLLAMA_START_ATTEMPTED = True
+    if not OLLAMA_SERVE_CMD.exists():
+        print(f"  [WARN] Ollama 未安装或路径不存在: {OLLAMA_SERVE_CMD}")
+        return False
+    try:
+        creationflags = 0
+        startupinfo = None
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        subprocess.Popen(
+            [str(OLLAMA_SERVE_CMD), "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            cwd=str(OLLAMA_SERVE_CMD.parent),
+            creationflags=creationflags,
+            startupinfo=startupinfo,
+        )
+        print(f"      [Phase F] Ollama 服务未运行，已尝试自动启动: {OLLAMA_SERVE_CMD}")
+    except Exception as e:
+        print(f"  [WARN] Ollama 自动启动失败: {e}")
+        return False
+
+    deadline = time.time() + max(5.0, OLLAMA_START_TIMEOUT)
+    while time.time() < deadline:
+        if _is_ollama_ready():
+            available = _ollama_model_available(OLLAMA_MODEL)
+            if available is False:
+                print(f"  [WARN] Ollama 已启动，但模型不存在: {OLLAMA_MODEL}")
+            return True
+        time.sleep(1.0)
+    print(f"  [WARN] Ollama 自动启动后仍未响应: {OLLAMA_HOST}")
+    return False
 
 
 def _is_proxy_connection_error(err):
@@ -7973,6 +8053,16 @@ def generate_chinese_summaries(items):
     total = len(items)
     print(f"      逐条调用 Ollama ({OLLAMA_MODEL})，共 {total} 条...")
     print(f"      [v4.6] 已启用文章正文/视频字幕抓取 + 摘要缓存 + 实用导向 + 反幻觉校验")
+
+    if not ensure_ollama_ready():
+        print("      [WARN] Ollama 不可用，本轮摘要回退为原标题/原摘要，不逐条重试。")
+        for item in items:
+            item["title_zh"] = item.get("title", "")
+            item["summary_zh"] = item.get("summary", "")
+            item["category"] = item.get("category", "AI")
+            item["_summary_generation_failed"] = True
+        print(f"      完成: {total} 条已处理, 摘要缓存命中 0 条, 0 条被过滤为非AI相关")
+        return items
 
     cache_hits = 0
     for i, item in enumerate(items, 1):
