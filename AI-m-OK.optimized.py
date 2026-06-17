@@ -108,6 +108,10 @@ FEISHU_TEXT_FALLBACK = os.environ.get("FEISHU_TEXT_FALLBACK", "1").strip().lower
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwesMzAFIU45qjxw0ISW92L-ufU4tFG78")
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:14b"
+OLLAMA_HOST = "http://localhost:11434"
+OLLAMA_SERVE_CMD = Path(r"C:\Users\jiangxy2\AppData\Local\Programs\Ollama\ollama.exe")
+OLLAMA_START_TIMEOUT = float(os.environ.get("OLLAMA_START_TIMEOUT", "20"))
+_OLLAMA_START_ATTEMPTED = False
 
 PRODUCTION_PAGES_DIR = Path(r"F:\jiangxy2\AI-m-OK")
 SHARED_STATE_DIR = Path(r"F:\jiangxy2\AI\.aim_ok_state")
@@ -148,6 +152,8 @@ DEFAULT_PAGES_CANDIDATES = [
 ]
 PAGES_DIR = _resolve_pages_dir()
 PAGES_URL = "https://twinkleshinya.github.io/AI-m-OK"
+PAGES_READY_TIMEOUT = float(os.environ.get("PAGES_READY_TIMEOUT", "180"))
+PAGES_READY_POLL_INTERVAL = float(os.environ.get("PAGES_READY_POLL_INTERVAL", "5"))
 HISTORY_FILE = PAGES_DIR / "push_history.json"
 PUSH_ARCHIVE_FILE = PAGES_DIR / "push_archive.json"
 STATE_DIR = _resolve_state_dir()
@@ -1922,10 +1928,13 @@ def feedback_bias_score(item, profile=None):
     account = str(item.get("account_name", "") or "").strip()
     product_key = extract_product_dedup_key(item)
     event_fp = extract_event_fingerprint(item)
-    score += profile.get("source_bias", {}).get(source, 0.0) * 1.2
+    is_wechat_item = source == WECHAT_SOURCE_NAME or domain == "mp.weixin.qq.com"
+    if not is_wechat_item:
+        score += profile.get("source_bias", {}).get(source, 0.0) * 1.2
     score += profile.get("category_bias", {}).get(category, 0.0) * 1.0
-    score += profile.get("domain_bias", {}).get(domain, 0.0) * 0.6
-    score += profile.get("account_bias", {}).get(account, 0.0) * 0.7
+    if not is_wechat_item:
+        score += profile.get("domain_bias", {}).get(domain, 0.0) * 0.6
+    score += profile.get("account_bias", {}).get(account, 0.0) * (0.35 if is_wechat_item else 0.7)
     score += profile.get("product_bias", {}).get(product_key, 0.0) * 1.4
     score += profile.get("event_bias", {}).get(event_fp, 0.0) * 1.1
 
@@ -1959,6 +1968,29 @@ def should_filter_by_feedback_profile(item, profile=None):
         return True
     if not item.get("is_positive_sample") and is_similar_to_handled_story(item):
         return True
+
+    # 反馈学习只能“精确屏蔽”已经明确不要的 URL/标题/产品/事件。
+    # 泛化负偏好不能把新的优质公众号内容整批杀掉，否则 WeRSS 抓到上千条也进不了审核池。
+    is_wechat_item = source == WECHAT_SOURCE_NAME or "mp.weixin.qq.com" in str(item.get("url", "") or "")
+    high_value_override = (
+        item.get("is_positive_sample")
+        or is_wechat_audio_priority_item(item)
+        or is_high_value_audio_example(item)
+        or is_high_value_practical_example(item)
+        or is_ai_copyright_item(item)
+        or is_ai_team_management_tool_item(item)
+        or (
+            is_wechat_item
+            and (
+                item.get("is_priority_wechat")
+                or get_wechat_account_hint(item)
+                or audio_relevance_score(item) >= 2
+            )
+        )
+    )
+    if high_value_override:
+        return False
+
     source_bias = float(profile.get("source_bias", {}).get(source, 0.0) or 0.0)
     category_bias = float(profile.get("category_bias", {}).get(category, 0.0) or 0.0)
     domain_bias = float(profile.get("domain_bias", {}).get(domain, 0.0) or 0.0)
@@ -2030,6 +2062,82 @@ def _maybe_throttle_request(url):
         REQUEST_HOST_LAST_TS[host] = time.time()
     except Exception:
         return
+
+
+def _ollama_request(path, timeout=5):
+    try:
+        return requests.get(
+            f"{OLLAMA_HOST}{path}",
+            timeout=timeout,
+            proxies={"http": None, "https": None},
+        )
+    except Exception:
+        return None
+
+
+def _is_ollama_ready():
+    resp = _ollama_request("/api/tags", timeout=4)
+    return bool(resp and resp.ok)
+
+
+def _ollama_model_available(model_name):
+    resp = _ollama_request("/api/tags", timeout=6)
+    if not resp or not resp.ok:
+        return None
+    try:
+        data = resp.json() or {}
+        for row in data.get("models", []) or []:
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            if name == model_name or name.split(":", 1)[0] == model_name.split(":", 1)[0]:
+                return True
+    except Exception:
+        return None
+    return False
+
+
+def ensure_ollama_ready():
+    global _OLLAMA_START_ATTEMPTED
+    if _is_ollama_ready():
+        return True
+    if _OLLAMA_START_ATTEMPTED:
+        return False
+    _OLLAMA_START_ATTEMPTED = True
+    if not OLLAMA_SERVE_CMD.exists():
+        print(f"  [WARN] Ollama 未安装或路径不存在: {OLLAMA_SERVE_CMD}")
+        return False
+    try:
+        creationflags = 0
+        startupinfo = None
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        subprocess.Popen(
+            [str(OLLAMA_SERVE_CMD), "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            cwd=str(OLLAMA_SERVE_CMD.parent),
+            creationflags=creationflags,
+            startupinfo=startupinfo,
+        )
+        print(f"      [Phase F] Ollama 服务未运行，已尝试自动启动: {OLLAMA_SERVE_CMD}")
+    except Exception as e:
+        print(f"  [WARN] Ollama 自动启动失败: {e}")
+        return False
+
+    deadline = time.time() + max(5.0, OLLAMA_START_TIMEOUT)
+    while time.time() < deadline:
+        if _is_ollama_ready():
+            available = _ollama_model_available(OLLAMA_MODEL)
+            if available is False:
+                print(f"  [WARN] Ollama 已启动，但模型不存在: {OLLAMA_MODEL}")
+            return True
+        time.sleep(1.0)
+    print(f"  [WARN] Ollama 自动启动后仍未响应: {OLLAMA_HOST}")
+    return False
 
 
 def _is_proxy_connection_error(err):
@@ -4128,6 +4236,8 @@ def _fetch_werss_wechat_articles(source_name, max_items=None):
             items.append(it)
             if max_items and len(items) >= max_items:
                 return items
+        if sqlite_items:
+            return items
         api_items = _fetch_werss_api_articles(base, source_name=source_name, max_items=max_items)
         feed_items = _fetch_werss_feed_articles(base, source_name=source_name, max_items=max_items)
         for it in api_items + feed_items:
@@ -7946,6 +8056,16 @@ def generate_chinese_summaries(items):
     print(f"      逐条调用 Ollama ({OLLAMA_MODEL})，共 {total} 条...")
     print(f"      [v4.6] 已启用文章正文/视频字幕抓取 + 摘要缓存 + 实用导向 + 反幻觉校验")
 
+    if not ensure_ollama_ready():
+        print("      [WARN] Ollama 不可用，本轮摘要回退为原标题/原摘要，不逐条重试。")
+        for item in items:
+            item["title_zh"] = item.get("title", "")
+            item["summary_zh"] = item.get("summary", "")
+            item["category"] = item.get("category", "AI")
+            item["_summary_generation_failed"] = True
+        print(f"      完成: {total} 条已处理, 摘要缓存命中 0 条, 0 条被过滤为非AI相关")
+        return items
+
     cache_hits = 0
     for i, item in enumerate(items, 1):
         cache_key, cached = _apply_summary_cache(item, i, total)
@@ -9578,7 +9698,7 @@ def publish_to_pages(html_content, date_str):
         git_dir = pages / ".git"
         if not git_dir.exists():
             print(f"[WARN] GitHub Pages 目录不是 git 仓库，仅写入静态文件: {pages}")
-            return
+            return True
 
         subprocess.run(["git", "add", "-A"], cwd=str(pages), check=True, capture_output=True)
         diff_proc = subprocess.run(
@@ -9588,7 +9708,7 @@ def publish_to_pages(html_content, date_str):
         )
         if diff_proc.returncode == 0:
             print(f"      Published locally: {PAGES_URL}/latest.html (无新增变更)")
-            return
+            return True
 
         subprocess.run(
             ["git", "commit", "-m", f"update: AI-m-OK {date_str}"],
@@ -9609,8 +9729,42 @@ def publish_to_pages(html_content, date_str):
             cwd=str(pages), check=True, capture_output=True, timeout=60,
         )
         print(f"      Published: {PAGES_URL}/latest.html ✅")
+        return True
     except Exception as e:
         print(f"[WARN] GitHub Pages push failed: {e}")
+        return False
+
+
+def wait_for_published_page(date_str, timeout=None):
+    timeout = max(10.0, float(timeout or PAGES_READY_TIMEOUT))
+    deadline = time.time() + timeout
+    page_url = f"{PAGES_URL}/AI-m-OK-{date_str}.html"
+    expected_title = f"AI'm OK-{date_str}"
+    last_error = ""
+
+    while time.time() < deadline:
+        ts = int(time.time())
+        try:
+            resp = requests.get(
+                f"{page_url}?v={date_str.replace('-', '')}-{ts}",
+                timeout=12,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "User-Agent": "AI-m-OK/PagesReady",
+                },
+                proxies={"http": None, "https": None},
+            )
+            if resp.ok and expected_title in (resp.text or ""):
+                print(f"      网页已上线可访问: {page_url} ✅")
+                return True
+            last_error = f"HTTP {resp.status_code}"
+        except Exception as e:
+            last_error = str(e)
+        time.sleep(max(1.0, PAGES_READY_POLL_INTERVAL))
+
+    print(f"  [WARN] 网页发布后等待超时，线上暂不可确认访问: {page_url} ({last_error})")
+    return False
 
 
 def backup_script_to_github(date_str):
@@ -9997,8 +10151,22 @@ def main():
     output_path.write_text(html, encoding="utf-8")
     print(f"\n📄 [Phase G] HTML saved: {output_path}")
 
-    card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
-    feishu_ok = push_feishu(card, review_approved=True)
+    print("\n🚀 [Phase H] Publishing...")
+    page_ready = False
+    publish_ok = publish_to_pages(html, today)
+    if publish_ok:
+        page_ready = wait_for_published_page(today)
+    else:
+        print("  [WARN] 网页发布失败，本次仍可人工审核，但不建议立即推送飞书。")
+
+    feishu_ok = False
+    if not publish_ok:
+        print("      网页未成功发布，本次跳过飞书推送。")
+    elif not page_ready:
+        print("      网页尚未确认可访问，本次跳过飞书推送，避免收到打不开的链接。")
+    else:
+        card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
+        feishu_ok = push_feishu(card, review_approved=True)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
     # ── 只有飞书真正推送成功后，才保存历史；审核阶段不算推送 ──
@@ -10023,11 +10191,10 @@ def main():
             f"审核未选排除键 {len(unselected_history_keys)} 条，"
             f"历史浏览归档 {archive_total} 条，后续将避免重复筛出。"
         )
+        publish_to_pages(html, today)
     else:
         print("      飞书推送未成功，本次不写入历史/审核反馈，避免审核过但未送达的内容被误去重。")
 
-    print("\n🚀 [Phase H] Publishing...")
-    publish_to_pages(html, today)
     backup_script_to_github(today)
 
     intl_final = sum(1 for it in final if it.get("source_type") != "domestic")
