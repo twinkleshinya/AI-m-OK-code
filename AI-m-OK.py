@@ -1,4 +1,4 @@
-﻿"""
+"""
 AI'm OK v3.2 — 每日 AI 资讯抓取、HTML 生成与飞书推送脚本
 ================================================================================
 修复内容（v3.2 新增）：
@@ -582,8 +582,8 @@ WERSS_AUTOSUBSCRIBE_ACCOUNTS = [
     if x.strip()
 ]
 WERSS_UPDATE_BEFORE_FETCH = os.environ.get("WERSS_UPDATE_BEFORE_FETCH", "1").strip().lower() in {"1", "true", "yes"}
-WERSS_REFRESH_ALL_SUBSCRIPTIONS = os.environ.get("WERSS_REFRESH_ALL_SUBSCRIPTIONS", "1").strip().lower() in {"1", "true", "yes"}
-WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "1").strip().lower() in {"1", "true", "yes"}
+WERSS_REFRESH_ALL_SUBSCRIPTIONS = os.environ.get("WERSS_REFRESH_ALL_SUBSCRIPTIONS", "0").strip().lower() in {"1", "true", "yes"}
+WERSS_UPDATE_ALL_RECENT = os.environ.get("WERSS_UPDATE_ALL_RECENT", "0").strip().lower() in {"1", "true", "yes"}
 WERSS_UPDATE_LIMIT = int(os.environ.get("WERSS_UPDATE_LIMIT", "12" if FAST_FETCH_MODE else "17"))
 WERSS_REFRESH_RECENT_DAYS = int(os.environ.get("WERSS_REFRESH_RECENT_DAYS", "7"))
 WERSS_STALE_BOOTSTRAP_LIMIT = int(os.environ.get("WERSS_STALE_BOOTSTRAP_LIMIT", str(max(WERSS_UPDATE_LIMIT, 24))))
