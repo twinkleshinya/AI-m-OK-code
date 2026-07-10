@@ -10160,12 +10160,13 @@ def main():
         print("  [WARN] 网页发布失败，本次仍可人工审核，但不建议立即推送飞书。")
 
     feishu_ok = False
+    card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
     if not publish_ok:
         print("      网页未成功发布，本次跳过飞书推送。")
     elif not page_ready:
-        print("      网页尚未确认可访问，本次跳过飞书推送，避免收到打不开的链接。")
+        print("      [WARN] 网页已发布，但线上可访问探测超时；本次继续按已审核结果推送飞书，网页版可能还需几分钟生效。")
+        feishu_ok = push_feishu(card, review_approved=True)
     else:
-        card = build_feishu_card(final, today, audio_source_items=audio_source_items, audio_item_urls=selected_audio_urls)
         feishu_ok = push_feishu(card, review_approved=True)
     print(f"      飞书推送: Top {min(FEISHU_TOP_N, len(final))} 条 | 网页版: 全部 {len(final)} 条")
 
