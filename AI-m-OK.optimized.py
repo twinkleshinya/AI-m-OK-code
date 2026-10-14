@@ -167,10 +167,11 @@ LINK_CHECK_CACHE_TTL_HOURS = float(os.environ.get("LINK_CHECK_CACHE_TTL_HOURS", 
 LINK_CHECK_MAX_WORKERS = max(1, int(os.environ.get("LINK_CHECK_MAX_WORKERS", "8")))
 POSITIVE_SAMPLE_INBOX_FILE = Path(os.environ.get("POSITIVE_SAMPLE_INBOX_FILE", str(SCRIPT_DIR / "wechat_positive_samples.txt")))
 POSITIVE_SAMPLE_LEARNED_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LEARNED_FILE", str(SCRIPT_DIR / "wechat_positive_samples.learned.txt")))
-POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(PAGES_DIR / "positive_samples.json")))
+POSITIVE_SAMPLE_LIBRARY_FILE = Path(os.environ.get("POSITIVE_SAMPLE_LIBRARY_FILE", str(STATE_DIR / "positive_samples.json")))
 POOL_A_MIN_PUSH = int(os.environ.get("POOL_A_MIN_PUSH", "10"))
 AUTO_GITHUB_BACKUP = os.environ.get("AUTO_GITHUB_BACKUP", "1").strip().lower() not in {"0", "false", "no"}
 SCRIPT_BACKUP_BRANCH = os.environ.get("SCRIPT_BACKUP_BRANCH", "main").strip() or "main"
+SCRIPT_BACKUP_REPO_DIR = os.environ.get("SCRIPT_BACKUP_REPO_DIR", "").strip()
 SCRIPT_BACKUP_TARGETS = [
     x.strip()
     for x in os.environ.get("SCRIPT_BACKUP_TARGETS", "AI-m-OK.py,AI-m-OK.optimized.py").split(",")
@@ -9008,38 +9009,15 @@ def build_feishu_card(items, date_str, audio_source_items=None, audio_item_urls=
             -float(x.get("heat_score", 0) or 0),
         ),
     )
-    feishu_items = select_source_balanced_items(
-        ranked_feishu_items,
-        limit=FEISHU_TOP_N,
-        default_max=FEISHU_MAX_PER_SOURCE,
-        wechat_max=FEISHU_WECHAT_MAX,
-        preserve_order=True,
-    )
+    # ???????????????????????????????
+    # ????????????????
+    feishu_items = list(ranked_feishu_items)
     feishu_item_urls = {
         str(it.get("url", "") or "").rstrip("/")
         for it in feishu_items
         if it.get("url")
     }
-    manual_section_items = [
-        it for it in ranked_feishu_items
-        if it.get("_manual_review_section_changed")
-        and it.get("_review_section") in {"intl", "domestic"}
-        and str(it.get("url", "") or "").rstrip("/") not in feishu_item_urls
-    ]
-    if manual_section_items:
-        for item in manual_section_items:
-            url = str(item.get("url", "") or "").rstrip("/")
-            if not url or url in feishu_item_urls:
-                continue
-            feishu_items.append(item)
-            feishu_item_urls.add(url)
-        feishu_items.sort(
-            key=lambda x: (
-                int(x.get("_review_rank", 10**6)),
-                -float(x.get("heat_score", 0) or 0),
-            )
-        )
-        print(f"      [v4.8] 手动改为国际/国内的条目已强制保留飞书: {len(manual_section_items)} 条")
+    print(f"      [v4.9] ????????????? {len(feishu_items)} ?")
     print(f"      [v4.0] 飞书Top来源配比: {source_mix_text(feishu_items)}")
     canonical_audio_urls = {
         str(u or "").rstrip("/")
@@ -9767,6 +9745,24 @@ def wait_for_published_page(date_str, timeout=None):
     return False
 
 
+def get_script_backup_repo_dir(script_path=None):
+    """Resolve the Git repository used to back up the active script."""
+    if script_path is None:
+        script_path = Path(__file__).resolve()
+    else:
+        script_path = Path(script_path).resolve()
+
+    if SCRIPT_BACKUP_REPO_DIR:
+        return Path(SCRIPT_BACKUP_REPO_DIR).expanduser().resolve()
+    if (script_path.parent / ".git").exists():
+        return script_path.parent
+
+    fallback = Path(r"F:\jiangxy2\AI-m-OK-code").resolve()
+    if (fallback / ".git").exists():
+        return fallback
+    return script_path.parent
+
+
 def backup_script_to_github(date_str):
     """
     备份脚本自身到代码仓库（可通过 AUTO_GITHUB_BACKUP 关闭）。
@@ -9779,7 +9775,7 @@ def backup_script_to_github(date_str):
     except Exception:
         script_path = Path(sys.argv[0]).resolve() if sys.argv else Path.cwd() / "AI-m-OK.py"
 
-    repo_dir = script_path.parent
+    repo_dir = get_script_backup_repo_dir(script_path)
     if not (repo_dir / ".git").exists():
         print(f"[WARN] 脚本备份跳过：目录不是 git 仓库 -> {repo_dir}")
         return
