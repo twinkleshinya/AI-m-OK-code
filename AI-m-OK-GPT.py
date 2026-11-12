@@ -13,7 +13,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import requests as _real_requests
@@ -40,7 +39,7 @@ SCRIPT_BACKUP_REPO_DIR = os.environ.get(
 
 
 def build_responses_payload(model, prompt):
-    return {"model": str(model), "input": str(prompt)}
+    return {"model": str(model), "input": prompt if isinstance(prompt, list) else str(prompt)}
 
 
 def extract_response_text(data):
@@ -66,9 +65,10 @@ def extract_response_text(data):
 
 def extract_json_object(text):
     raw = str(text or "").strip()
-    for match in re.finditer(r"\{.*?\}", raw, re.DOTALL):
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", raw):
         try:
-            value = json.loads(match.group(0))
+            value, _ = decoder.raw_decode(raw[match.start():])
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
@@ -106,11 +106,6 @@ class _RequestsProxy:
             return self._original.post(url, json=json, timeout=timeout, **kwargs)
 
         messages = (json or {}).get("messages", [])
-        prompt = "\n\n".join(
-            str(message.get("content", ""))
-            for message in messages
-            if isinstance(message, dict)
-        ).strip()
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json",
@@ -118,17 +113,20 @@ class _RequestsProxy:
         response = self._original.post(
             f"{OPENAI_BASE_URL}/responses",
             headers=headers,
-            json=build_responses_payload(OPENAI_MODEL, prompt),
-            timeout=timeout or OPENAI_TIMEOUT,
+            json=build_responses_payload(OPENAI_MODEL, messages),
+            timeout=OPENAI_TIMEOUT,
             **kwargs,
         )
         if not response.ok:
             return _Response(response)
         data = response.json()
+        if data.get("status") not in (None, "completed"):
+            raise RuntimeError(f"OpenAI API 未完成生成: {data.get('status')}")
         output_text = extract_response_text(data)
         if not output_text:
             raise RuntimeError("OpenAI API 返回为空，未找到 output_text")
-        return _Response(_SyntheticResponse(output_text))
+        result = extract_json_object(output_text)
+        return _Response(_SyntheticResponse(json_module_dumps(result)))
 
 
 class _SyntheticResponse:
@@ -147,6 +145,10 @@ def ensure_gpt_ready():
         return False
     print(f"      GPT API 已配置: {OPENAI_MODEL} ({OPENAI_BASE_URL})")
     return True
+
+
+def json_module_dumps(value):
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _load_source_module():
@@ -170,7 +172,8 @@ def backup_gpt_script_to_github(date_str):
         return
     target = repo_dir / "AI-m-OK-GPT.py"
     try:
-        shutil.copyfile(Path(__file__).resolve(), target)
+        if Path(__file__).resolve() != target.resolve():
+            shutil.copyfile(Path(__file__).resolve(), target)
         subprocess.run(
             ["git", "add", "--", target.name],
             cwd=str(repo_dir),
@@ -186,7 +189,7 @@ def backup_gpt_script_to_github(date_str):
             print("      GPT 脚本备份: 无新增变更")
             return
         subprocess.run(
-            ["git", "commit", "-m", f"backup: AI-m-OK GPT {OPENAI_MODEL} {date_str}"],
+            ["git", "commit", "-m", f"backup: AI-m-OK GPT {OPENAI_MODEL} {date_str}", "--", target.name],
             cwd=str(repo_dir),
             check=True,
             capture_output=True,
@@ -214,18 +217,36 @@ def backup_gpt_script_to_github(date_str):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("AI-m-OK GPT：默认模型 gpt-6.1-sol；先设置 OPENAI_API_KEY，再运行此脚本。")
+        print("不需要打开 ChatGPT/Codex。参数：--check-config（离线检查），--learn-samples。")
+        return 0
+    if "--learn-samples" not in sys.argv and not ensure_gpt_ready():
+        return 2
+    if "--check-config" in sys.argv:
+        print("配置检查通过；此检查未请求 API，尚未验证密钥、模型权限及余额。")
+        return 0
     source = _load_source_module()
     source.requests = _RequestsProxy(_real_requests)
     source.OLLAMA_MODEL = OPENAI_MODEL
     source.OLLAMA_URL = "http://localhost:11434/api/chat"
     source.SUMMARY_CACHE_VERSION = GPT_SUMMARY_CACHE_VERSION
+    source.SUMMARY_CACHE_FILE = Path(os.environ.get(
+        "GPT_SUMMARY_CACHE_FILE", str(source.STATE_DIR / "summary_cache_gpt.json")
+    ))
+    source._SUMMARY_CACHE = None
+    original_print = source.print
+    def gpt_print(*args, **kwargs):
+        original_print(*(arg.replace("Ollama", "GPT API") if isinstance(arg, str) else arg for arg in args), **kwargs)
+    source.print = gpt_print
     source.ensure_ollama_ready = ensure_gpt_ready
     source.backup_script_to_github = backup_gpt_script_to_github
     if "--learn-samples" in sys.argv:
         source.learn_positive_samples_only()
     else:
         source.main()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
